@@ -3217,7 +3217,7 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
         tempo_change: Optional[torch.Tensor] = None,
         local_bpm_log_padded: Optional[torch.Tensor] = None,
         input_chroma_padded: Optional[torch.Tensor] = None,
-        dit_modulation_precompute: bool = False,
+        dit_modulation_precompute: bool = True,
         **kwargs,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -3458,7 +3458,7 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
         tempo_change: Optional[torch.Tensor] = None,
         local_bpm_log: Optional[torch.Tensor] = None,
         input_chroma: Optional[torch.Tensor] = None,
-        dit_modulation_precompute: bool = False,
+        dit_modulation_precompute: bool = True,
         **kwargs,
     ) -> torch.Tensor:
         """
