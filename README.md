@@ -3,9 +3,9 @@
 **Beat-phase conditioning and auxiliary supervision for beat-aligned streaming music accompaniment generation.**
 
 <p align="center">
-  <a href="https://arxiv.org/abs/XXXX.XXXXX"><b>Paper (arXiv)</b></a> ·
-  <a href="https://kevin-bretz.github.io/SilentMetronome"><b>Demo page</b></a> ·
-  <a href="https://huggingface.co/WhatzInTheGrass/SilentMetronome"><b>Pretrained checkpoints</b></a><br>
+  <a href="https://arxiv.org/abs/XXXX.XXXXX"><b>📄 Paper (arXiv)</b></a> ·
+  <a href="https://kevin-bretz.github.io/SilentMetronome"><b>🔊 Demo page</b></a> ·
+  <a href="https://huggingface.co/WhatzInTheGrass/SilentMetronome"><b>🤗 Pretrained checkpoints</b></a><br>
   <sub><i>paper, demo page, and checkpoint repository are being finalised — these links go live soon</i></sub>
 </p>
 
