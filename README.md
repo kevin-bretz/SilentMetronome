@@ -30,7 +30,7 @@ SilentMetronome extends [stream-music-gen](https://github.com/lukewys/stream-mus
 
 The heads are dropped at inference time, so they add zero latency. They shape the trunk representation toward pitch- and rhythm-aware features, and the future-token heads in particular recover the performance that is otherwise lost when the model must operate with little or no lookahead.
 
-**3. Streaming latency.** Because the beat-phase signal for a chunk is known ahead of time, the per-layer modulation tensors can be precomputed for the whole upcoming chunk before decoding starts. The conditioning overhead is a few percent of real-time factor in our benchmarks (`scripts/gen_pred/benchmark_latency.py`).
+**3. Streaming latency.** Because the beat-phase signal for a chunk is known ahead of time, the per-layer modulation tensors are precomputed for the whole upcoming chunk before decoding starts and applied as elementwise scaling — the conditioning adds no cost to the serial decoding path.
 
 ## Results
 
@@ -176,16 +176,6 @@ python scripts/gen_pred/gen_and_evaluate.py \
 
 The script generates accompaniments for the test set and reports Beat-F, COCOLA, and FAD. `--skip_audio_generation`, `--skip_beat_alignment`, `--skip_cocola`, and `--skip_fad` restrict it to specific stages. We recommend 1024 samples for stable FAD/COCOLA estimates.
 
-## Streaming latency benchmark
-
-```bash
-python scripts/gen_pred/benchmark_latency.py \
-    --model_path models/<EXP_NAME>/step=200000.ckpt \
-    --out_json latency.json
-```
-
-Measures per-chunk wall-clock and real-time factor for the streaming generation loop, including the precomputed-modulation fast path for the SiMe conditioning (`scripts/gen_pred/test_precompute_equivalence.py` verifies the fast path is numerically equivalent to the naive one).
-
 ## Repository layout
 
 ```
@@ -193,7 +183,7 @@ configs/                     Training configs (argbind YAML with $include compos
 scripts/
   train_prefix_dec_online.py   Main training entry point
   extract_target_*.py          Aux-head target extraction (multipitch / CQT / chroma)
-  gen_pred/                    Generation, evaluation, latency benchmarking
+  gen_pred/                    Generation and evaluation
 stream_music_gen/
   dataset/                     Data download, tokenization, beat grids, window dumping
   models/                      Causal transformer with SiMe DiT conditioning + aux heads
