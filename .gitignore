@@ -1,0 +1,38 @@
+# Byte-compiled / packaging
+__pycache__/
+*.py[cod]
+*.so
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+.coverage
+
+# Editors
+.vscode/
+.idea/
+
+# Environment files
+.env
+.env.*
+
+# Data, pretrained weights, and training outputs (large, machine-local)
+/stream_music_gen_data/
+/pretrained_models/
+/cocola_models/
+/beat_transformer_models/
+/models/
+/logs/
+/slurm_logs/
+wandb/

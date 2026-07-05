@@ -1,0 +1,41 @@
+# PHASE B: minimal-DiT beat-phase cond + target-stem chroma AUX loss
+# + INPUT-mix chroma DiT conditioning.
+#
+# Builds on Phase A by feeding the audio-derived input chroma into the same
+# DiT condition channel (summed with the beat-phase projection inside
+# ``_build_dit_condition``). Tests whether explicit harmonic context input
+# helps on top of the aux-loss representational pressure.
+
+data_base_dir: "stream_music_gen_data/precompute_audio_mixdown_20s_beat"
+
+train_steps: 200000
+checkpoint_interval: 20000
+sample_interval: 20000
+
+AdamW.lr: !!float 1e-4
+LinearWarmupCosineDecay.warmup_iters: 10000
+LinearWarmupCosineDecay.total_iters: 200000
+LinearWarmupCosineDecay.eta_min: !!float 1e-5
+
+# Model: minimal DiT beat cond + chroma cond + chroma aux head all ON.
+OnlinePrefixDecoderTransformerMultiOut.use_beat_phase: false
+OnlinePrefixDecoderTransformerMultiOut.use_beat_phase_dit_cond: true
+OnlinePrefixDecoderTransformerMultiOut.beat_dit_cond_mlp_expansion: 4
+OnlinePrefixDecoderTransformerMultiOut.beat_dit_cond_minimal: true
+OnlinePrefixDecoderTransformerMultiOut.time_sig_vocab_size: 16
+OnlinePrefixDecoderTransformerMultiOut.use_chroma_dit_cond: true
+OnlinePrefixDecoderTransformerMultiOut.chroma_dim: 12
+OnlinePrefixDecoderTransformerMultiOut.use_chroma_aux_head: true
+OnlinePrefixDecoderTransformerMultiOut.chroma_aux_head_hidden_dim: 256
+
+# Lit module mirror flags.
+use_beat_phase: false
+use_beat_phase_dit_cond: true
+beat_dit_cond_mlp_expansion: 4
+beat_dit_cond_minimal: true
+time_sig_vocab_size: 16
+use_chroma_dit_cond: true
+chroma_dim: 12
+use_chroma_aux_head: true
+chroma_aux_head_hidden_dim: 256
+chroma_aux_head_weight: !!float 1.0

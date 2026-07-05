@@ -1,0 +1,62 @@
+# PHASE E: PHASE C + strengthened chroma aux loss.
+#
+# Same as Phase C (full DiT beat-phase cond + chroma aux head, no chroma
+# DiT cond) but with the four aux-loss strengtheners enabled:
+#
+#   #1  Linear projection head (replaces 2-layer MLP). Pushes the
+#       representation pressure from the head into the trunk.
+#   #2  Hybrid MSE + cosine loss. Cosine pressures direction (chroma
+#       *shape*); MSE pressures magnitude. 0.5/0.5 mix.
+#   #4  Multi-horizon prediction at frames {0, +4, +8, +16} (now,
+#       +80 ms, +160 ms, +320 ms). Forces the trunk to encode short
+#       lookahead, not just current pitch class.
+#   #5  Deep supervision at transformer layers 8 and 12 (mid + late
+#       trunk in the 16-layer model). Gradient pressure earlier in the
+#       trunk, not only at the top.
+#
+# 200K from-scratch, matched to Phase C config so the only variable is
+# "+ aux-loss strengtheners". A/B answer: do the strengtheners help in
+# isolation, before we apply the same ideas to multipitch / CQT aux
+# heads in later phases.
+
+data_base_dir: "stream_music_gen_data/precompute_audio_mixdown_20s_beat"
+
+train_steps: 200000
+checkpoint_interval: 20000
+sample_interval: 20000
+
+AdamW.lr: !!float 1e-4
+LinearWarmupCosineDecay.warmup_iters: 10000
+LinearWarmupCosineDecay.total_iters: 200000
+LinearWarmupCosineDecay.eta_min: !!float 1e-5
+
+# Model: full DiT beat cond (no minimal flag) + chroma aux head ON, no chroma cond.
+OnlinePrefixDecoderTransformerMultiOut.use_beat_phase: false
+OnlinePrefixDecoderTransformerMultiOut.use_beat_phase_dit_cond: true
+OnlinePrefixDecoderTransformerMultiOut.beat_dit_cond_mlp_expansion: 4
+OnlinePrefixDecoderTransformerMultiOut.time_sig_vocab_size: 16
+OnlinePrefixDecoderTransformerMultiOut.use_chroma_dit_cond: false
+OnlinePrefixDecoderTransformerMultiOut.chroma_dim: 12
+OnlinePrefixDecoderTransformerMultiOut.use_chroma_aux_head: true
+OnlinePrefixDecoderTransformerMultiOut.chroma_aux_head_hidden_dim: 256
+# Aux-loss strengtheners (model side):
+OnlinePrefixDecoderTransformerMultiOut.chroma_aux_head_linear: true
+OnlinePrefixDecoderTransformerMultiOut.chroma_aux_horizons: [0, 4, 8, 16]
+OnlinePrefixDecoderTransformerMultiOut.chroma_aux_deep_supervision_layers: [8, 12]
+
+# Lit module mirror flags.
+use_beat_phase: false
+use_beat_phase_dit_cond: true
+beat_dit_cond_mlp_expansion: 4
+time_sig_vocab_size: 16
+use_chroma_dit_cond: false
+chroma_dim: 12
+use_chroma_aux_head: true
+chroma_aux_head_hidden_dim: 256
+chroma_aux_head_weight: !!float 1.0
+# Aux-loss strengtheners (lit-module side):
+chroma_aux_head_linear: true
+chroma_aux_loss_type: "mse+cos"
+chroma_aux_horizons: [0, 4, 8, 16]
+chroma_aux_deep_supervision_layers: [8, 12]
+chroma_aux_deep_supervision_weights: [0.5, 0.5]

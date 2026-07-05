@@ -1,0 +1,29 @@
+$include:
+  - configs/online/online_prefix_decoder/online_prefix_decoder_base.yml
+  - configs/online/online_prefix_decoder/online_prefix_decoder_beat_phase_dit_mp_cqt_aux.yml
+
+# PHASE K @ fv=-50: same recipe as Phase K (target-stem future-token aux
+# head, K=3 offsets [10, 25, 40]) at the most adverse causal setting —
+# the encoder sees inputs only up to position p-50 (50-frame look-BEHIND
+# from "now"). Used to span the deployability axis: fv=+50 (peeks ahead),
+# fv=0 (strictly causal), fv=-50 (lagging encoder, simulates pipeline
+# delay).
+#
+# Aux supervision is well-defined for any fv (target labels at p+δ exist
+# in the full target stem). The encoder must extrapolate ~|fv|+δ frames
+# forward, which is genuinely hard at fv=-50, δ=40 (~90 frame horizon).
+# Beat-F is expected to degrade vs fv=0; this run tells us whether the
+# Phase K mechanism still provides any signal at the harshest setting.
+
+OnlinePrefixDecoderTransformerMultiOut.future_visibility: -50
+OnlinePrefixDecoderTransformerMultiOut.chunk_length: 50
+
+OnlinePrefixDecoderTransformerMultiOut.use_target_token_future_aux_head: true
+OnlinePrefixDecoderTransformerMultiOut.target_token_future_aux_head_hidden_dim: 256
+OnlinePrefixDecoderTransformerMultiOut.future_aux_offsets: [10, 25, 40]
+
+# Lit module mirror flags.
+use_target_token_future_aux_head: true
+target_token_future_aux_head_hidden_dim: 256
+target_token_future_aux_head_weight: !!float 1.0
+future_aux_offsets: [10, 25, 40]

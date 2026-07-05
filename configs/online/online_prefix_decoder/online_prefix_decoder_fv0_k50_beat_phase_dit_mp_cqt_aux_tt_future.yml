@@ -1,0 +1,29 @@
+$include:
+  - configs/online/online_prefix_decoder/online_prefix_decoder_base.yml
+  - configs/online/online_prefix_decoder/online_prefix_decoder_beat_phase_dit_mp_cqt_aux.yml
+
+# PHASE K @ fv=0: same recipe as Phase K (target-stem future-token aux head
+# on the generation pathway, K=3 offsets [10, 25, 40]) but with NO future-
+# mix lookahead. The aux head still has well-defined supervision (target
+# labels at p+δ always exist in the full stem), but the encoder must
+# extrapolate without seeing input-mix tokens past p. Tests whether the
+# Phase K mechanism — pressure on the next-token circuit to encode future
+# structure — survives when the encoder lookahead is removed.
+#
+# Deployability angle: this is the strictly causal setting (no peeking),
+# which is what an actual streaming/RT deployment can use without extra
+# latency. If Phase K's gains transfer here, the mechanism is real and
+# not "the model just gets to cheat with future-mix attention".
+
+OnlinePrefixDecoderTransformerMultiOut.future_visibility: 0
+OnlinePrefixDecoderTransformerMultiOut.chunk_length: 50
+
+OnlinePrefixDecoderTransformerMultiOut.use_target_token_future_aux_head: true
+OnlinePrefixDecoderTransformerMultiOut.target_token_future_aux_head_hidden_dim: 256
+OnlinePrefixDecoderTransformerMultiOut.future_aux_offsets: [10, 25, 40]
+
+# Lit module mirror flags.
+use_target_token_future_aux_head: true
+target_token_future_aux_head_hidden_dim: 256
+target_token_future_aux_head_weight: !!float 1.0
+future_aux_offsets: [10, 25, 40]

@@ -1,0 +1,61 @@
+# PHASE G: NO beat-phase cond input — beat-phase aux (full feature set)
+#         + multipitch aux + CQT aux.
+#
+# Cond side:  none. The model gets only the input audio embedding.
+# Aux side:   beat-phase aux head FULL (predicts sin/cos beat+bar phase
+#             via MSE+cos, log-bpm via MSE, time-sig numerator via CE)
+#             + multipitch aux (BCE presence + masked MSE velocity)
+#             + CQT aux (MSE+cos on 84-bin log-mag).
+# Periodic encoding for the phase target (sin/cos), matching the cond
+# version's signal structure. Tests whether rich aux supervision can
+# replace explicit periodic conditioning — if Run G matches or beats
+# Run F, conditioning input is unnecessary.
+
+data_base_dir: "stream_music_gen_data/precompute_audio_mixdown_20s_beat"
+
+compile: false
+num_workers: 8
+
+train_steps: 200000
+checkpoint_interval: 20000
+sample_interval: 20000
+
+AdamW.lr: !!float 1e-4
+LinearWarmupCosineDecay.warmup_iters: 10000
+LinearWarmupCosineDecay.total_iters: 200000
+LinearWarmupCosineDecay.eta_min: !!float 1e-5
+
+# Model: NO beat cond, NO chroma anything; ALL aux heads on.
+OnlinePrefixDecoderTransformerMultiOut.use_beat_phase: false
+OnlinePrefixDecoderTransformerMultiOut.use_beat_phase_dit_cond: false
+OnlinePrefixDecoderTransformerMultiOut.time_sig_vocab_size: 16
+OnlinePrefixDecoderTransformerMultiOut.use_chroma_dit_cond: false
+OnlinePrefixDecoderTransformerMultiOut.use_chroma_aux_head: false
+OnlinePrefixDecoderTransformerMultiOut.use_multipitch_aux_head: true
+OnlinePrefixDecoderTransformerMultiOut.multipitch_aux_head_hidden_dim: 256
+OnlinePrefixDecoderTransformerMultiOut.multipitch_dim: 128
+OnlinePrefixDecoderTransformerMultiOut.use_cqt_aux_head: true
+OnlinePrefixDecoderTransformerMultiOut.cqt_aux_head_hidden_dim: 256
+OnlinePrefixDecoderTransformerMultiOut.cqt_dim: 84
+OnlinePrefixDecoderTransformerMultiOut.use_beat_phase_aux_head_full: true
+OnlinePrefixDecoderTransformerMultiOut.beat_phase_aux_head_full_hidden_dim: 256
+
+# Lit module mirror flags.
+use_beat_phase: false
+use_beat_phase_dit_cond: false
+time_sig_vocab_size: 16
+use_chroma_dit_cond: false
+use_chroma_aux_head: false
+use_multipitch_aux_head: true
+multipitch_aux_head_hidden_dim: 256
+multipitch_aux_head_weight: !!float 1.0
+multipitch_dim: 128
+use_cqt_aux_head: true
+cqt_aux_head_hidden_dim: 256
+cqt_aux_head_weight: !!float 1.0
+cqt_dim: 84
+use_beat_phase_aux_head_full: true
+beat_phase_aux_head_full_hidden_dim: 256
+beat_phase_aux_head_full_weight: !!float 1.0
+beat_phase_aux_full_bpm_weight: !!float 0.1
+beat_phase_aux_full_ts_weight: !!float 0.1

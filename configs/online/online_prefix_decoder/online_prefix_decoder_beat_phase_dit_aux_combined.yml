@@ -1,0 +1,39 @@
+# Beat-phase DiT CONDITIONING + AUX-LOSS combined mixin (200K schedule).
+#
+# Same as the original DiT 200K recipe, plus an auxiliary beat-phase
+# prediction head reading the decoder's pre-logits hidden state. The
+# explicit DiT condition feeds beat info INTO the model; the aux loss
+# pressures the encoder to ALSO surface beat info in its hidden states.
+# Goal: test whether aux pressure on top of conditioning gives
+# regulariser / representation gains beyond conditioning alone.
+
+# Data: same root with beat_cond.pt per window
+data_base_dir: "stream_music_gen_data/precompute_audio_mixdown_20s_beat"
+
+# Match original DiT 200K schedule.
+train_steps: 200000
+checkpoint_interval: 20000
+sample_interval: 20000
+
+AdamW.lr: !!float 1e-4
+LinearWarmupCosineDecay.warmup_iters: 10000
+LinearWarmupCosineDecay.total_iters: 200000
+LinearWarmupCosineDecay.eta_min: !!float 1e-5
+
+# Model: DiT per-layer ON (full conditioning, matches original DiT) +
+# aux head ON.
+OnlinePrefixDecoderTransformerMultiOut.use_beat_phase: false
+OnlinePrefixDecoderTransformerMultiOut.use_beat_phase_dit_cond: true
+OnlinePrefixDecoderTransformerMultiOut.beat_dit_cond_mlp_expansion: 4
+OnlinePrefixDecoderTransformerMultiOut.use_beat_phase_aux_head: true
+OnlinePrefixDecoderTransformerMultiOut.beat_phase_aux_head_hidden_dim: 256
+OnlinePrefixDecoderTransformerMultiOut.time_sig_vocab_size: 16
+
+# Lit module mirror.
+use_beat_phase: false
+use_beat_phase_dit_cond: true
+beat_dit_cond_mlp_expansion: 4
+use_beat_phase_aux_head: true
+beat_phase_aux_head_hidden_dim: 256
+beat_phase_aux_head_weight: !!float 1.0
+time_sig_vocab_size: 16

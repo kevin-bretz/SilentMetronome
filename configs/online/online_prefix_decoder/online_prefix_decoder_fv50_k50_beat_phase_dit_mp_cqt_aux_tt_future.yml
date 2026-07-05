@@ -1,0 +1,40 @@
+$include:
+  - configs/online/online_prefix_decoder/online_prefix_decoder_base.yml
+  - configs/online/online_prefix_decoder/online_prefix_decoder_beat_phase_dit_mp_cqt_aux.yml
+
+# PHASE K: Phase F (fv=+50, DiT beat cond, mp + cqt aux) + target-stem
+# future-token aux head.
+#
+# Motivation: Phase J (mp/cqt feature prediction at t+δ) trained the aux
+# loss cleanly (val cqt-future rose monotonically with δ) but Beat-F was
+# unchanged (0.361 vs F-fv+50 0.360). Diagnosis: the aux task is satisfied
+# by routing future-mix attention outputs to the head — it never has to
+# touch the generation pathway. The next-token prediction circuit kept
+# ignoring future-mix.
+#
+# Phase K puts the supervision DIRECTLY on the generation pathway. The
+# head predicts the actual target-stem DAC token (same vocabulary as the
+# main next-token head) at mangled position p+δ from h_t. Two key
+# differences from Phase J:
+#   1) The target token at p+δ is NOT in the model's input at p
+#      (autoregressively in the future) — cannot be solved by copying
+#      attention outputs.
+#   2) The most useful information for predicting target-stem-at-p+δ is
+#      what the accompaniment is doing around frame p+δ → future-mix
+#      tokens. So gradient pressure to attend future-mix is real here.
+#
+# fv=+50 ⇒ max δ (40) fits inside the lookahead with 10 frames margin.
+
+OnlinePrefixDecoderTransformerMultiOut.future_visibility: 50
+OnlinePrefixDecoderTransformerMultiOut.chunk_length: 50
+
+# Phase K: target-stem future-token head (CE on patterned tokens).
+OnlinePrefixDecoderTransformerMultiOut.use_target_token_future_aux_head: true
+OnlinePrefixDecoderTransformerMultiOut.target_token_future_aux_head_hidden_dim: 256
+OnlinePrefixDecoderTransformerMultiOut.future_aux_offsets: [10, 25, 40]
+
+# Lit module mirror flags.
+use_target_token_future_aux_head: true
+target_token_future_aux_head_hidden_dim: 256
+target_token_future_aux_head_weight: !!float 1.0
+future_aux_offsets: [10, 25, 40]

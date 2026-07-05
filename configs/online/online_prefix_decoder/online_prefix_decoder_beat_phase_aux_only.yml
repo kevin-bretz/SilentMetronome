@@ -1,0 +1,43 @@
+# Beat-phase AUX-LOSS-ONLY mixin (200K schedule).
+#
+# Tests whether the encoder can be pushed to extract beat phase purely
+# from input audio (and output token context) when given the right
+# gradient pressure, *without* any explicit beat-phase conditioning.
+#
+# Mechanism: a small MLP head reads the decoder's pre-logits hidden
+# state ``[B, S, dim]`` and predicts the per-frame beat_cond
+# ``[sin(φ_beat), cos(φ_beat), sin(φ_bar), cos(φ_bar)]``. Loss is MSE
+# against ground-truth beat_cond, weighted by ``beat_phase_aux_head_weight``
+# and added to the main cross-entropy. Aux head is dropped at inference
+# (zero deployment cost).
+#
+# Same 200K cosine as the original DiT recipe so this is apples-to-apples
+# vs both the original-DiT and minimal-DiT-200K runs.
+
+# Data: same root with beat_cond.pt per window
+data_base_dir: "stream_music_gen_data/precompute_audio_mixdown_20s_beat"
+
+# Match original DiT 200K schedule.
+train_steps: 200000
+checkpoint_interval: 20000
+sample_interval: 20000
+
+AdamW.lr: !!float 1e-4
+LinearWarmupCosineDecay.warmup_iters: 10000
+LinearWarmupCosineDecay.total_iters: 200000
+LinearWarmupCosineDecay.eta_min: !!float 1e-5
+
+# Model: NO conditioning, AUX HEAD ONLY.
+OnlinePrefixDecoderTransformerMultiOut.use_beat_phase: false
+OnlinePrefixDecoderTransformerMultiOut.use_beat_phase_dit_cond: false
+OnlinePrefixDecoderTransformerMultiOut.use_beat_phase_aux_head: true
+OnlinePrefixDecoderTransformerMultiOut.beat_phase_aux_head_hidden_dim: 256
+OnlinePrefixDecoderTransformerMultiOut.time_sig_vocab_size: 16
+
+# Lit module mirror.
+use_beat_phase: false
+use_beat_phase_dit_cond: false
+use_beat_phase_aux_head: true
+beat_phase_aux_head_hidden_dim: 256
+beat_phase_aux_head_weight: !!float 1.0
+time_sig_vocab_size: 16

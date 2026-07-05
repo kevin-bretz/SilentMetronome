@@ -1,0 +1,17 @@
+$include:
+  - configs/online/online_prefix_decoder/online_prefix_decoder_fv0_k50_beat_phase_dit_minimal_chroma_aux_cond.yml
+
+train_steps: 20
+val_interval: 10
+limit_val_batches: 4
+checkpoint_interval: 10
+sample_interval: 999999
+log_every_n_steps: 1
+
+batch_size: 2
+num_workers: 2
+compile: false
+load_from_latest_checkpoint: false
+
+LinearWarmupCosineDecay.warmup_iters: 5
+LinearWarmupCosineDecay.total_iters: 20

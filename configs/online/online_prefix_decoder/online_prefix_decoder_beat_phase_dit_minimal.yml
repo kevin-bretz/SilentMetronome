@@ -1,0 +1,40 @@
+# DiT-style per-layer beat-phase conditioning MIXIN — MINIMAL variant.
+# Same DiT architecture as ``..._beat_phase_dit.yml`` but the conditioning
+# input is reduced to the two signals the ablation study showed actually
+# carry information:
+#   * 4 ch  beat_cond  (sin/cos beat phase + sin/cos bar phase)
+#   * 1 ch  local_bpm_log (per-frame log(BPM/120))
+# Drops: time_sig_num/den embeddings, time_sig_change, global bpm_log,
+# tempo_change. Their ablations showed beat-F unchanged or marginally
+# improved when zeroed, so they are dead weight.
+#
+# Trained 300K steps (50% longer than the baseline 200K) with cosine decay
+# spanning the full 300K — the previous DiT run's val/loss was still
+# trending down at step 200K, suggesting the schedule decayed too quickly.
+
+# Data: same root with beat_cond.pt per window
+data_base_dir: "stream_music_gen_data/precompute_audio_mixdown_20s_beat"
+
+# Extended schedule: 300K steps, cosine decay across full 300K.
+train_steps: 300000
+checkpoint_interval: 20000
+sample_interval: 20000
+
+AdamW.lr: !!float 1e-4
+LinearWarmupCosineDecay.warmup_iters: 10000
+LinearWarmupCosineDecay.total_iters: 300000
+LinearWarmupCosineDecay.eta_min: !!float 1e-5
+
+# Model: DiT per-layer ON, additive OFF, MINIMAL conditioning.
+OnlinePrefixDecoderTransformerMultiOut.use_beat_phase: false
+OnlinePrefixDecoderTransformerMultiOut.use_beat_phase_dit_cond: true
+OnlinePrefixDecoderTransformerMultiOut.beat_dit_cond_mlp_expansion: 4
+OnlinePrefixDecoderTransformerMultiOut.beat_dit_cond_minimal: true
+OnlinePrefixDecoderTransformerMultiOut.time_sig_vocab_size: 16
+
+# Lit module (argbind without_prefix): mirror flags so the model gets them.
+use_beat_phase: false
+use_beat_phase_dit_cond: true
+beat_dit_cond_mlp_expansion: 4
+beat_dit_cond_minimal: true
+time_sig_vocab_size: 16
