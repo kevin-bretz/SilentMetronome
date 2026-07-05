@@ -2,6 +2,13 @@
 
 **Beat-phase conditioning and auxiliary supervision for beat-aligned streaming music accompaniment generation.**
 
+<p align="center">
+  <a href="https://arxiv.org/abs/XXXX.XXXXX"><b>Paper (arXiv)</b></a> ·
+  <a href="https://kevin-bretz.github.io/SilentMetronome"><b>Demo page</b></a> ·
+  <a href="https://huggingface.co/WhatzInTheGrass/SilentMetronome"><b>Pretrained checkpoints</b></a><br>
+  <sub><i>paper, demo page, and checkpoint repository are being finalised — these links go live soon</i></sub>
+</p>
+
 SilentMetronome extends [stream-music-gen](https://github.com/lukewys/stream-music-gen) (Wu et al., 2025), a causal transformer that generates a musical accompaniment stem in real time while listening to an incoming mix. The baseline system produces musically plausible audio but drifts off the beat: under strictly causal streaming constraints its accompaniments align poorly with the pulse of the input. SilentMetronome fixes this with two lightweight, architecture-level additions — a *silent metronome* conditioning signal and a set of auxiliary prediction heads — that more than double beat alignment while also improving harmonic coherence.
 
 <p align="center">
@@ -36,11 +43,11 @@ Slakh2100 test set, 1024 samples, streaming with 1 s chunks (`chunk_size = 50` f
 | + SiMe + auxiliary heads | **0.436** | **60.85** | 4.28 |
 | *non-causal reference (1 s lookahead)* | *0.319* | *60.98* | *3.35* |
 
-- **Beat-F**: F-measure between beats detected ([Beat This](https://github.com/CPJKU/beat_this)) in the generated stem and the reference beat grid.
+- **Beat-F**: F-measure between beats detected ([Beat This](https://github.com/CPJKU/beat_this)) in the generated stem and beats detected in the input mix.
 - **COCOLA**: harmonic/rhythmic compatibility between the generated stem and the input mix.
 - **FAD**: Fréchet Audio Distance against real stems.
 
-The full system reaches better beat alignment and compatibility than a non-causal model that is allowed to see one full second of the future mix.
+The full causal system exceeds the beat alignment of — and is on par with the compatibility of — a non-causal reference that is allowed to see one full second of the future mix.
 
 ## Installation
 
@@ -52,11 +59,28 @@ pip install -e .
 
 > **Note:** the pinned `x-transformers==2.16.0` is load-bearing — later 2.17.x releases change adaptive-norm internals and silently break checkpoint compatibility.
 
-Download the causal DAC codec weights from [lukewys/stream_music_gen](https://huggingface.co/lukewys/stream_music_gen) and place them at:
+Download the causal DAC codec weights from [lukewys/stream_music_gen](https://huggingface.co/lukewys/stream_music_gen) into `pretrained_models/`:
 
+```bash
+pip install "huggingface_hub[cli]"
+huggingface-cli download lukewys/stream_music_gen \
+    250121_stemmix_dac_weights_400k_steps.pth --local-dir pretrained_models/
 ```
-pretrained_models/250121_stemmix_dac_weights_400k_steps.pth
+
+## Pretrained checkpoints
+
+To skip training entirely and jump straight to inference and evaluation, download our released checkpoints from [Hugging Face](https://huggingface.co/WhatzInTheGrass/SilentMetronome) *(repository not live yet — checkpoints for all four models in the results table, plus additional future-visibility variants, are being uploaded soon)*. The layout matches the `models/` directory expected by all scripts:
+
+```bash
+# everything:
+huggingface-cli download WhatzInTheGrass/SilentMetronome --local-dir models/
+
+# or a single model, e.g. the full system:
+huggingface-cli download WhatzInTheGrass/SilentMetronome \
+    --include "pref_dec_online_fv0_k50_beat_phase_dit_mp_cqt_aux_tt_future/*" --local-dir models/
 ```
+
+Each checkpoint pairs with its config in the [Training](#training) table below; see [Evaluation](#evaluation) for how to generate and score with them.
 
 ## Data preparation
 
@@ -134,12 +158,18 @@ Key configs (all at `chunk_size = 50`, i.e. 1 s chunks):
 
 ## Evaluation
 
-Download the [COCOLA checkpoint](https://drive.google.com/file/d/1S-_OvnDwNFLNZD5BmI1Ouck_prutRVWZ/view) into `cocola_models/`. Beat This weights download automatically.
+Download the [COCOLA checkpoint](https://drive.google.com/file/d/1S-_OvnDwNFLNZD5BmI1Ouck_prutRVWZ/view) into `cocola_models/` (Beat This weights download automatically):
+
+```bash
+pip install gdown
+mkdir -p cocola_models
+gdown 1S-_OvnDwNFLNZD5BmI1Ouck_prutRVWZ -O "cocola_models/checkpoint-epoch=87-val_loss=0.00.ckpt"
+```
 
 ```bash
 python scripts/gen_pred/gen_and_evaluate.py \
     --model_type prefix_decoder_online \
-    --model_path models/<EXP_NAME>/checkpoints/step=200000.ckpt \
+    --model_path models/<EXP_NAME>/step=200000.ckpt \
     --split test \
     --num_samples 1024
 ```
@@ -150,7 +180,7 @@ The script generates accompaniments for the test set and reports Beat-F, COCOLA,
 
 ```bash
 python scripts/gen_pred/benchmark_latency.py \
-    --model_path models/<EXP_NAME>/checkpoints/step=200000.ckpt \
+    --model_path models/<EXP_NAME>/step=200000.ckpt \
     --out_json latency.json
 ```
 
