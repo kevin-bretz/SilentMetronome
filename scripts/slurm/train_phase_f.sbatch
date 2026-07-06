@@ -142,7 +142,6 @@ elif (( LATEST_STEP < TARGET_STEPS )); then
   echo "[chain] not done yet; self-submitting next slot"
   NEXT_JOB=$(sbatch --parsable \
     --job-name="${SLURM_JOB_NAME}" \
-    --exclude=node870 \
     --export=ALL,FV="${FV}",INIT_CKPT="${INIT_CKPT}",EXP_NAME="${EXP_NAME}",TARGET_STEPS="${TARGET_STEPS}",CHAIN_NEXT="${CHAIN_NEXT}" \
     scripts/slurm/train_phase_f.sbatch)
   echo "[chain] queued next slot: job ${NEXT_JOB}"
@@ -151,7 +150,6 @@ else
   if [ "${CHAIN_NEXT}" = "1" ]; then
     CKPT_PATH="${SAVE_DIR}/step=${TARGET_STEPS}.ckpt"
     EVAL_F=$(sbatch --parsable \
-      --exclude=node870 \
       --export=ALL,MODEL_PATH="${CKPT_PATH}",SPLIT=test \
       scripts/slurm/eval_beat_phase.sbatch)
     echo "[chain] PHASE F eval job: ${EVAL_F}"

@@ -4,12 +4,9 @@
 #SBATCH --time=01:30:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=32
 #SBATCH --gres=gpu:a100:1
 #SBATCH --mem=40G
-# exclusive: co-tenant contention inflated latency ~33% (Jun 10 node875 quiet vs Jul 3 node871 busy)
-#SBATCH --exclusive
-#SBATCH --exclude=node870,node874
 #SBATCH --output=slurm_logs/%x_%j.out
 #SBATCH --error=slurm_logs/%x_%j.err
 

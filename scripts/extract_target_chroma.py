@@ -113,6 +113,8 @@ def main():
     parser.add_argument(
         "--splits", nargs="+", default=["train", "valid", "test"]
     )
+    parser.add_argument("--shard_idx", type=int, default=0)
+    parser.add_argument("--num_shards", type=int, default=1)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--max_examples", type=int, default=-1, help="-1 = all")
     args = parser.parse_args()
@@ -133,10 +135,11 @@ def main():
             continue
         windows = sorted(p for p in split_dir.iterdir() if p.is_dir())
         # Shard.
+        windows = windows[args.shard_idx :: args.num_shards]
         if args.max_examples > 0:
             windows = windows[: args.max_examples]
         print(
-            f"[{split}] "
+            f"[{split}] shard {args.shard_idx}/{args.num_shards}, "
             f"-> {len(windows)} windows"
         )
         for w in tqdm(windows, desc=f"{split}", mininterval=5.0):

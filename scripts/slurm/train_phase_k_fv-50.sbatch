@@ -8,7 +8,6 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:a100:1
 #SBATCH --mem=80G
-#SBATCH --exclude=node870,node874
 #SBATCH --output=slurm_logs/%x_%j.out
 #SBATCH --error=slurm_logs/%x_%j.err
 
@@ -156,7 +155,6 @@ elif (( LATEST_STEP < TARGET_STEPS )); then
   echo "[chain] not done yet; self-submitting next slot"
   NEXT_JOB=$(sbatch --parsable \
     --job-name="${SLURM_JOB_NAME}" \
-    --exclude=node870,node874 \
     --export=ALL,INIT_CKPT="${INIT_CKPT}",EXP_NAME="${EXP_NAME}",TARGET_STEPS="${TARGET_STEPS}",CHAIN_NEXT="${CHAIN_NEXT}" \
     scripts/slurm/train_phase_k_fv-50.sbatch)
   echo "[chain] queued next slot: job ${NEXT_JOB}"
@@ -165,7 +163,6 @@ else
   if [ "${CHAIN_NEXT}" = "1" ]; then
     CKPT_PATH="${SAVE_DIR}/step=${TARGET_STEPS}.ckpt"
     EVAL_J=$(sbatch --parsable \
-      --exclude=node870,node874 \
       --export=ALL,MODEL_PATH="${CKPT_PATH}",SPLIT=test \
       scripts/slurm/eval_beat_phase.sbatch)
     echo "[chain] PHASE K fv=-50 eval (cond-on) job: ${EVAL_J}"
