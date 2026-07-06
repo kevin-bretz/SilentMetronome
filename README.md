@@ -176,6 +176,17 @@ python scripts/gen_pred/gen_and_evaluate.py \
 
 The script generates accompaniments for the test set and reports Beat-F, COCOLA, and FAD. `--skip_audio_generation`, `--skip_beat_alignment`, `--skip_cocola`, and `--skip_fad` restrict it to specific stages. We recommend 1024 samples for stable FAD/COCOLA estimates.
 
+## Latency benchmark
+
+To measure the real-time factor of streaming generation (A100 required, matching the paper's setup):
+
+```bash
+python scripts/gen_pred/benchmark_latency.py \
+    --model_path models/<EXP_NAME>/step=200000.ckpt --dit_precompute
+```
+
+The script reports per-chunk latency and real-time factors, separating the cold-cache first chunk from warm-cache steady state. Drop `--dit_precompute` to time the naive per-step conditioning path instead; `scripts/gen_pred/test_precompute_equivalence.py` verifies that both paths generate identical tokens.
+
 ## Repository layout
 
 ```
