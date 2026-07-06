@@ -21,7 +21,7 @@ SilentMetronome extends [stream-music-gen](https://github.com/lukewys/stream-mus
   <img src="assets/beat_phase_conditioning.png" width="720" alt="Beat-phase conditioning signal construction and per-layer injection.">
 </p>
 
-**1. Silent-metronome (SiMe) conditioning.** From each track's beat grid we compute a per-frame beat-phase signal at the 50 Hz token rate: `[sin 2πφ_beat, cos 2πφ_beat, sin 2πφ_bar, cos 2πφ_bar]`, where `φ_beat` is the phase within the current beat and `φ_bar` the phase within the current bar, plus a time-signature embedding. This is the information a metronome click would carry — but injected silently, as a conditioning signal rather than audio. It enters the decoder through DiT-style per-layer adaptive layer-norm (scale/shift) modulation, which we found far more effective than additive input conditioning.
+**1. Silent-metronome (SiMe) conditioning.** From each track's beat grid we compute a per-frame beat-phase signal at the 50 Hz token rate: `[sin 2πφ_beat, cos 2πφ_beat, sin 2πφ_bar, cos 2πφ_bar]`, where `φ_beat` is the phase within the current beat and `φ_bar` the phase within the current bar, plus a time-signature embedding. This is the information a metronome click would carry — but injected silently, as a conditioning signal rather than audio. It enters the decoder through DiT-style per-layer adaptive layer-norm (gain/gate) modulation, which we found far more effective than additive input conditioning.
 
 **2. Auxiliary prediction heads.** Small MLP heads on the decoder trunk are trained to predict, at each frame:
 - the **multipitch** activation of the target stem,
