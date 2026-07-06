@@ -1,10 +1,10 @@
-# Beat-phase DiT CONDITIONING + AUX-LOSS combined mixin (200K schedule).
+# Beat-phase DiT conditioning + aux-loss combined mixin (200K schedule).
 #
 # Same as the original DiT 200K recipe, plus an auxiliary beat-phase
 # prediction head reading the decoder's pre-logits hidden state. The
-# explicit DiT condition feeds beat info INTO the model; the aux loss
-# pressures the encoder to ALSO surface beat info in its hidden states.
-# Goal: test whether aux pressure on top of conditioning gives
+# explicit DiT condition feeds beat info into the model while the aux
+# loss pressures the encoder to also surface beat info in its hidden
+# states. Tests whether aux pressure on top of conditioning gives
 # regulariser / representation gains beyond conditioning alone.
 
 # Data: same root with beat_cond.pt per window

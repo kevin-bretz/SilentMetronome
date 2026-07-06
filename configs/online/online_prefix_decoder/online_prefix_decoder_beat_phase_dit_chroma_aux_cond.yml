@@ -1,10 +1,11 @@
-# PHASE D: FULL-cond DiT beat-phase + target-stem chroma AUX loss
-# + INPUT-mix chroma DiT conditioning.
+# Full-cond DiT beat-phase + target-stem chroma aux loss
+# + input-mix chroma DiT conditioning.
 #
-# Builds on Phase C by adding audio-derived input chroma into the DiT
-# condition channel (summed with the full beat-phase projection in
-# ``_build_dit_condition``). Tests whether explicit harmonic input on
-# top of full beat cond + chroma aux head yields further gain.
+# Builds on the chroma-aux config by adding audio-derived input chroma
+# into the DiT condition channel (summed with the full beat-phase
+# projection in ``_build_dit_condition``). Tests whether explicit
+# harmonic input on top of full beat cond + chroma aux head yields
+# further gain.
 
 data_base_dir: "stream_music_gen_data/precompute_audio_mixdown_20s_beat"
 

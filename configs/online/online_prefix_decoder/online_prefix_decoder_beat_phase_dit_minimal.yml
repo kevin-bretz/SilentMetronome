@@ -1,15 +1,15 @@
-# DiT-style per-layer beat-phase conditioning MIXIN — MINIMAL variant.
+# DiT-style per-layer beat-phase conditioning mixin, minimal variant.
 # Same DiT architecture as ``..._beat_phase_dit.yml`` but the conditioning
 # input is reduced to the two signals the ablation study showed actually
 # carry information:
-#   * 4 ch  beat_cond  (sin/cos beat phase + sin/cos bar phase)
-#   * 1 ch  local_bpm_log (per-frame log(BPM/120))
-# Drops: time_sig_num/den embeddings, time_sig_change, global bpm_log,
+#   4 ch  beat_cond  (sin/cos beat phase + sin/cos bar phase)
+#   1 ch  local_bpm_log (per-frame log(BPM/120))
+# Drops time_sig_num/den embeddings, time_sig_change, global bpm_log, and
 # tempo_change. Their ablations showed beat-F unchanged or marginally
 # improved when zeroed, so they are dead weight.
 #
 # Trained 300K steps (50% longer than the baseline 200K) with cosine decay
-# spanning the full 300K — the previous DiT run's val/loss was still
+# spanning the full 300K, since the previous run's val/loss was still
 # trending down at step 200K, suggesting the schedule decayed too quickly.
 
 # Data: same root with beat_cond.pt per window

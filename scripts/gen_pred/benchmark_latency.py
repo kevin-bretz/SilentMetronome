@@ -5,8 +5,7 @@ by monkey-patching `generate_chunk` to record each chunk's latency inside a
 warm KV-cache session. Separates cold-cache chunk-1 from warm-cache chunks
 2..N. Also times the DAC decode step.
 
-Hard requirement: must run on an A100 (verified at startup; aborts otherwise),
-so that numbers are comparable to the ones we report.
+Requires an A100 (verified at startup) so numbers are comparable across runs.
 
 Example:
 
@@ -33,7 +32,7 @@ from stream_music_gen.lit_module.online_prefix_dec import (
 from stream_music_gen.utils.inference_utils import load_lit_model
 
 
-FRAME_RATE_HZ = 50  # DAC tokens are at 50 Hz; 1 frame = 20 ms
+FRAME_RATE_HZ = 50  # DAC tokens at 50 Hz, one frame is 20 ms
 
 
 def verify_a100():
@@ -90,13 +89,12 @@ def _build_gen_kwargs(batch, device):
 
 def time_session(model, gen_kwargs, inst_tokens, n_chunks,
                  dit_precompute=False):
-    """Run one full streaming session (n_chunks chunks back-to-back, warm
-    KV cache between chunks) and return per-chunk wall-clock seconds.
+    """Run one streaming session (n_chunks back-to-back, warm KV cache) and
+    return per-chunk wall-clock seconds.
 
-    Implementation: monkey-patch ``model.generate_chunk`` with a wrapper that
-    syncs CUDA, perf_counters the call, and appends the elapsed time to a
-    list. This measures exactly the per-chunk forward+sampling latency that
-    a real-time deployment would see between consecutive chunks.
+    ``model.generate_chunk`` is wrapped to sync CUDA and time each call, so
+    this measures the per-chunk forward+sampling latency a real-time
+    deployment would see between consecutive chunks.
     """
     times: List[float] = []
     original = model.generate_chunk
@@ -160,7 +158,6 @@ def main():
 
     verify_a100()
 
-    # Stable, fast inference
     torch.backends.cudnn.benchmark = True
     torch.set_grad_enabled(False)
 
@@ -192,7 +189,6 @@ def main():
     print(f"[setup] model parameters: {n_params/1e6:.2f}M")
     print(f"[setup] dit_precompute: {args.dit_precompute}")
 
-    # Warm up CUDA / cache / cuDNN benchmark
     print(f"[warmup] {args.n_warmup_sessions} warm-up sessions x "
           f"{args.n_chunks_per_session} chunks each...")
     for _ in range(args.n_warmup_sessions):
@@ -201,7 +197,6 @@ def main():
                          dit_precompute=args.dit_precompute)
     torch.cuda.synchronize()
 
-    # Timed sessions
     print(f"[time] {args.n_sessions} sessions x "
           f"{args.n_chunks_per_session} chunks each...")
     cold_chunk_times: List[float] = []   # chunk index 0 in each session
@@ -228,7 +223,6 @@ def main():
         if gc_was_enabled:
             gc.enable()
 
-    # Decode timing
     print(f"[decode] generating one chunk for DAC decode timing...")
     out = model.generate(
         seq_len=chunk_length,
@@ -247,7 +241,6 @@ def main():
     decode_times = time_decode(tokenizer, tokens_for_decode,
                                args.n_decode_runs)
 
-    # ---- Compose summary -------------------------------------------------
     cold = stats(cold_chunk_times)
     warm = stats(warm_chunk_times)
     dec = stats(decode_times)
@@ -270,8 +263,8 @@ def main():
         "dac_decode_chunk_s": dec,
     }
 
-    # Real-time factor: wall-clock seconds per second of audio.
-    # < 1 → can keep up with real-time.
+    # Real-time factor, wall-clock seconds per second of audio.
+    # Below 1 keeps up with real time.
     summary["rtf_cold_gen_only"] = cold["mean"] / audio_secs_per_chunk
     summary["rtf_warm_gen_only"] = warm["mean"] / audio_secs_per_chunk
     summary["rtf_warm_gen_plus_decode"] = (

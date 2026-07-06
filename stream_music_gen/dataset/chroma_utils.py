@@ -1,18 +1,10 @@
 """Utilities for computing per-frame chroma signals.
 
-Two flavors:
-
-1. Target chroma from MIDI (`compute_chroma_from_midi`). Used as an aux-loss
-   target — clean, deterministic, derived from the symbolic source. Only
-   meaningful for pitched stems; drum stems are flagged via ``has_chroma``.
-
-2. Input chroma from audio (`compute_chroma_from_audio`). Used as a DiT
-   conditioning signal that must match the inference distribution, so the
-   audio-domain extraction we use here is the same code path applied at
-   inference. HPSS is applied to suppress drum-derived broadband energy.
-
-Both produce ``[T, 12]`` float32 tensors at 50 Hz frame rate, matching the
-existing ``beat_cond.pt`` shape.
+`compute_chroma_from_midi` gives a clean deterministic aux-loss target from
+the symbolic source (pitched stems only, drums flagged via ``has_chroma``).
+`compute_chroma_from_audio` gives a DiT conditioning signal extracted from
+audio, the same code path applied at inference. Both produce ``[T, 12]``
+float32 tensors at 50 Hz, matching the ``beat_cond.pt`` shape.
 """
 
 from __future__ import annotations
@@ -29,11 +21,6 @@ FRAME_RATE_HZ = 50
 NUM_PITCH_CLASSES = 12
 
 
-# ---------------------------------------------------------------------------
-# MIDI -> chroma
-# ---------------------------------------------------------------------------
-
-
 @functools.lru_cache(maxsize=4096)
 def _parse_midi_notes(
     midi_path: str,
@@ -43,11 +30,9 @@ def _parse_midi_notes(
     Returns (start_sec, end_sec, pitch, velocity). Empty arrays if no notes.
     Velocity is the MIDI velocity (1-127) of the originating ``note_on``.
 
-    Cached per-process: every window of a track loads the same MIDI file
-    many times. Used by both ``chroma_utils.compute_chroma_from_midi`` and
-    ``multipitch_utils.compute_multipitch_from_midi`` /
-    ``compute_velocity_from_midi`` — single MIDI parse per file regardless
-    of how many derived signals are extracted.
+    Cached per-process since every window of a track loads the same MIDI
+    file. Shared by the chroma and multipitch/velocity extractors, so each
+    file is parsed once regardless of how many signals are derived.
     """
     import mido  # imported here so workers without mido don't error at import-time
 
@@ -69,11 +54,9 @@ def _parse_midi_notes(
             np.zeros(0, np.int64),
         )
 
-    # mido.MidiFile iteration yields messages with an absolute time in seconds
-    # *if* the tempo is correctly threaded. But each track is iterated
-    # separately so cross-track tempo events are missed. For slakh stems the
-    # MIDI is one stem per file; tempo is at the start. We use mid.tempo via
-    # the merged-track iterator, which threads tempo through.
+    # Iterating a mido.MidiFile yields message times in seconds with tempo
+    # threaded through the merged-track iterator. Slakh stems are one stem
+    # per file with tempo at the start, so this is safe.
     starts_list: list[float] = []
     ends_list: list[float] = []
     pitches: list[int] = []
@@ -128,7 +111,7 @@ def compute_chroma_from_midi(
     Returns (chroma [T, 12] float32, has_chroma bool). ``has_chroma`` is False
     when the MIDI is missing, unparseable, or contains no notes (e.g., empty
     stem). Drum-stem detection is handled by the caller via the track
-    metadata.yaml — this function does not inspect channel 10.
+    metadata.yaml, this function does not inspect channel 10.
     """
     starts, ends, pitches = _parse_midi_notes(midi_path)
     chroma = np.zeros((num_frames, NUM_PITCH_CLASSES), dtype=np.float32)
@@ -140,7 +123,7 @@ def compute_chroma_from_midi(
 
     overlap_mask = (ends > win_start_sec) & (starts < win_end_sec)
     if not overlap_mask.any():
-        # Empty stretch — return zeros but flag has_chroma False so the
+        # Empty stretch. Return zeros but flag has_chroma False so the
         # dataloader / aux loss can mask this window out.
         return chroma, False
 
@@ -160,26 +143,17 @@ def compute_chroma_from_midi(
         num_frames,
     )
 
-    # Vectorized add via numpy.add.at on (frame_idx, pitch_class) pairs.
-    # For each note: increment chroma[f_lo[i]:f_hi[i], p[i]] += 1
-    # We expand into a flat list of (frame, pitch) updates.
     for i in range(len(p)):
         if f_hi[i] > f_lo[i]:
             chroma[f_lo[i]:f_hi[i], p[i]] += 1.0
 
-    # Normalize per-frame so chroma rows are activity vectors (still up to ~K
-    # active simultaneous pitch classes; typical 1-3). We normalize by max so
-    # the dominant pitch is 1.0 — keeps the signal in [0, 1] and bounded.
+    # Max-normalize each frame so the dominant pitch class is 1.0, keeping
+    # the signal bounded in [0, 1].
     row_max = chroma.max(axis=1, keepdims=True)
     row_max = np.where(row_max > 0, row_max, 1.0)
     chroma = chroma / row_max
 
     return chroma.astype(np.float32), True
-
-
-# ---------------------------------------------------------------------------
-# Audio -> chroma
-# ---------------------------------------------------------------------------
 
 
 def compute_chroma_from_audio(
@@ -194,10 +168,10 @@ def compute_chroma_from_audio(
     ``audio`` is shape ``[N]`` or ``[1, N]``, float32 in [-1, 1].
     Returns ``[num_frames, 12]`` float32 in [0, 1] (per-frame max-normalized).
 
-    HPSS is opt-in: full librosa.effects.hpss costs ~80s per 20s window which
-    is untenable. STFT-domain HPSS (margin=1) is ~1.2s per window. Default
-    off; CQT alone tolerates moderate drum smear because broadband transients
-    spread roughly uniformly across pitch classes and are washed by per-frame
+    HPSS is opt-in because full librosa.effects.hpss costs ~80s per 20s
+    window, while STFT-domain HPSS (margin=1) is ~1.2s. Default off. CQT
+    alone tolerates moderate drum smear because broadband transients spread
+    roughly uniformly across pitch classes and are washed out by per-frame
     max-normalization.
     """
     import librosa
@@ -209,8 +183,8 @@ def compute_chroma_from_audio(
     hop_length = sample_rate // frame_rate_hz  # e.g. 32000 / 50 = 640
 
     if hpss:
-        # Cheap STFT-domain HPSS: ~10x faster than librosa.effects.hpss because
-        # it skips the inverse STFT for the percussive component we don't need.
+        # STFT-domain HPSS is ~10x faster than librosa.effects.hpss because
+        # it skips the inverse STFT for the unused percussive component.
         S = librosa.stft(audio, n_fft=2048, hop_length=hop_length)
         H, _ = librosa.decompose.hpss(S, margin=1.0)
         y_h = librosa.istft(H, hop_length=hop_length, length=len(audio))
@@ -222,8 +196,8 @@ def compute_chroma_from_audio(
     chroma = librosa.feature.chroma_cqt(
         y=y_h, sr=sample_rate, hop_length=hop_length, n_chroma=NUM_PITCH_CLASSES
     )
-    # chroma is [12, T_lib]. T_lib may differ slightly from num_frames due to
-    # padding; align by truncate / zero-pad on the right.
+    # chroma is [12, T_lib]. T_lib may differ slightly from num_frames due
+    # to padding, so align by truncating / zero-padding on the right.
     chroma = chroma.T  # [T_lib, 12]
     if chroma.shape[0] >= num_frames:
         chroma = chroma[:num_frames, :]
@@ -237,11 +211,6 @@ def compute_chroma_from_audio(
     chroma = chroma / row_max
 
     return chroma.astype(np.float32)
-
-
-# ---------------------------------------------------------------------------
-# Path helpers
-# ---------------------------------------------------------------------------
 
 
 def target_audio_path_to_midi_path(target_audio_path: str) -> str:

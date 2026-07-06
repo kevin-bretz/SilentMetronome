@@ -1,5 +1,5 @@
-# DiT-style per-layer beat-phase conditioning MIXIN. Compose with a
-# future_visibility + chunk_size config via $include, with THIS file LAST so
+# DiT-style per-layer beat-phase conditioning mixin. Compose with a
+# future_visibility + chunk_size config via $include, with this file last so
 # its overrides win. Example:
 #
 #   $include:
@@ -7,8 +7,8 @@
 #     - configs/online/online_prefix_decoder/online_prefix_decoder_beat_phase_dit.yml
 #
 # Differences vs the additive ``..._beat_phase.yml`` mixin:
-#   * use_beat_phase=False (additive conditioner OFF — the failed experiment)
-#   * use_beat_phase_dit_cond=True (per-layer adaptive layer-norm/scale ON)
+#   use_beat_phase=False (additive conditioner off)
+#   use_beat_phase_dit_cond=True (per-layer adaptive layer-norm/scale on)
 # Everything else (data root, LR, schedule, total_steps) stays identical so
 # the only thing varying between runs is the conditioning architecture.
 

@@ -1,19 +1,11 @@
-"""Extract per-window TARGET-stem CQT from audio.
+"""Extract per-window target-stem CQT from audio.
 
 Companion to ``extract_target_chroma.py`` and ``extract_input_chroma.py``.
-For each window dir:
-
-1. Reads ``metadata.json`` for ``target_audio_path`` and ``start_frame``.
-2. Reads only the [start_sample, start_sample + window_samples) slice of
-   the source FLAC (cheap soundfile read, ~30 ms/stem).
-3. Computes log-magnitude CQT at 84 bins / 7 octaves starting at C1.
-4. Writes ``target_cqt.pt`` (float16 [T, 84]) into the window dir.
-
-Bandwidth note: 84 bins, C1 → C8 (~32 Hz – 4186 Hz). Stays within the
-range where 4-layer DAC reconstructs faithfully — keeps the aux loss
-well-grounded with respect to what the model can actually generate.
-
-Idempotent.
+For each window dir, reads the window slice of the target FLAC, computes a
+log-magnitude CQT (84 bins, 7 octaves from C1) and writes ``target_cqt.pt``
+(float16 [T, 84]). The C1 to C8 range stays within what 4-layer DAC
+reconstructs faithfully, so the aux loss only asks for content the model
+can actually generate. Idempotent.
 """
 
 from __future__ import annotations
@@ -113,8 +105,7 @@ def _process_window(
         num_frames=duration_frames,
         frame_rate_hz=frame_rate_hz,
     )
-    # Cast to float16 for storage (50% size savings vs float32). Aux loss
-    # casts back to fp32 / bf16 as needed at training time.
+    # float16 halves storage, training casts back as needed.
     cqt_f16 = cqt.astype(np.float16)
     torch.save(torch.from_numpy(cqt_f16), out_path)
     return "ok"

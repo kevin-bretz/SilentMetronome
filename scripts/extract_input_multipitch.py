@@ -1,29 +1,14 @@
-"""Extract per-window INPUT-mix multipitch + velocity from MIDI for use as
-a TRAINING-TIME conditioning input.
+"""Extract per-window input-mix multipitch and velocity from MIDI.
 
-Companion to ``extract_target_multipitch.py``. The input mix is the union
-of all input stems; this script merges each stem's MIDI into a single
-polyphonic piano roll for the window:
-
-  multipitch[t, p] = 1 iff any input stem has that note active
-  velocity[t, p]   = max velocity over input stems
-
-Outputs in each window dir:
-  - ``input_multipitch.pt`` (uint8 [T, 128] in {0, 1})
-  - ``input_velocity.pt`` (uint8 [T, 128] in 0-127)
-  - ``input_has_multipitch.pt`` (scalar bool)
-
-Intended use: feed these tensors to the model as conditioning input
-during training, providing exact symbolic context for what the input
-mix is playing. This is a slakh-only signal (real audio at inference
-doesn't have ground-truth MIDI); training configs that use this cond
-must accept they are slakh-specialized unless paired with audio-domain
-cond fallback.
-
-For inference-time-recoverable cond input, ``input_chroma`` and
-``input_cqt`` (extracted from audio) are the parallel options.
-
-Idempotent.
+Companion to ``extract_target_multipitch.py``. Merges each input stem's
+MIDI into a single polyphonic piano roll per window, where
+multipitch[t, p] = 1 iff any input stem has that note active and
+velocity[t, p] is the max velocity over input stems. Writes
+``input_multipitch.pt`` (uint8 [T, 128] in {0, 1}), ``input_velocity.pt``
+(uint8 [T, 128] in 0-127) and ``input_has_multipitch.pt`` (scalar bool)
+into each window dir. Only usable as training-time conditioning, since
+real audio at inference has no ground-truth MIDI. ``input_chroma`` and
+``input_cqt`` are the audio-derived alternatives. Idempotent.
 """
 
 from __future__ import annotations

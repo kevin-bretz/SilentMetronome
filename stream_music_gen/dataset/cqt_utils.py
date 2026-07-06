@@ -5,11 +5,10 @@ that places ``bins_per_octave`` (default 12) bins per octave, giving a
 uniform pitch-class resolution that aligns with musical notes and
 preserves register (chroma is octave-folded; CQT is not).
 
-Bandwidth choice: 7 octaves × 12 bins = 84 bins, starting at C1 ≈ 32 Hz
-and ending at C8 ≈ 4186 Hz. This matches MERT's "music teacher" config
-and stays well within the bandwidth that 4-layer DAC reconstructs
-faithfully — so the aux loss is well-grounded (extending CQT beyond
-~5 kHz would push pressure on info the codec drops).
+Bandwidth is 7 octaves x 12 bins = 84 bins, from C1 (~32 Hz) to C8
+(~4186 Hz). This matches MERT's "music teacher" config and stays within
+the bandwidth that 4-layer DAC reconstructs faithfully, so the aux loss
+is not asking for information the codec drops.
 
 Output is ``[T, 84]`` ``float16`` at 50 Hz frame rate, saved as float16
 to halve storage (CQT magnitudes don't require full float32 precision).
@@ -22,7 +21,7 @@ import numpy as np
 FRAME_RATE_HZ = 50
 NUM_CQT_BINS = 84
 BINS_PER_OCTAVE = 12
-# C1 = MIDI note 24 = 32.703 Hz. 84 bins above = up to C8 ≈ 4186 Hz.
+# C1 = MIDI note 24 = 32.703 Hz. 84 bins above reach C8 (~4186 Hz).
 CQT_FMIN_NOTE = "C1"
 
 
@@ -71,18 +70,16 @@ def compute_cqt_from_audio(
         pad = np.zeros((num_frames - mag.shape[0], n_bins), np.float32)
         mag = np.concatenate([mag, pad.astype(mag.dtype)], axis=0)
 
-    # Log-magnitude (avoid log(0) with floor). Per-frame max-normalize so
-    # frame max is 0 dB and quieter bins are negative dB. This bounds the
-    # value range and preserves shape regardless of overall loudness —
-    # consistent with the per-frame max-normalize convention used for
-    # chroma in chroma_utils.compute_chroma_from_audio.
+    # Log-magnitude with a floor to avoid log(0). Per-frame max-normalize
+    # so the frame max is 0 dB and quieter bins are negative, bounding the
+    # range independent of loudness (same convention as the chroma path).
     mag = np.maximum(mag, 1e-7).astype(np.float32)
     log_mag = np.log10(mag)
     row_max = log_mag.max(axis=1, keepdims=True)
     log_mag = log_mag - row_max  # range [-inf, 0]; floor it
 
-    # Floor at -8 (8 decades = 160 dB dynamic range; well below any
-    # perceptual relevance) so the float16 representation is well-bounded.
+    # Floor at -8 (160 dB dynamic range, well below perceptual relevance)
+    # so the float16 representation is well-bounded.
     log_mag = np.maximum(log_mag, -8.0)
 
     return log_mag.astype(np.float32)

@@ -1,22 +1,21 @@
 """Equivalence test for chunk-ahead DiT modulation precompute.
 
-Verifies, on a real validation batch (batch_size=1, GPU required):
+Runs on one real validation batch (batch_size=1, GPU required) and checks:
 
-  A. numerics — batched precomputed gammas match per-frame naive gammas
-     (max |diff| over all AdaptiveLayerNorm / AdaptiveLayerScale modules
-     and all frames of one chunk; differences come only from GEMM
-     reduction order).
-  B. greedy generation (temperature=0) — token-exact match between the
-     naive per-step conditioning path and the precompute path.
-  C. sampled generation (same seed) — token match rate. A single
-     float-level logit flip at a sampling boundary cascades into a
-     different continuation, so this is reported, not asserted.
-  D. fallback — with the patches installed but precompute disabled, a
-     greedy run still matches the pristine pre-install run token-exactly.
-     (Doubles as a run-to-run determinism check for the baseline: if D
-     fails, read B as a match rate, not as a bug.)
+  A. Batched precomputed gammas match per-frame naive gammas over all
+     AdaptiveLayerNorm / AdaptiveLayerScale modules. Any difference should
+     come only from GEMM reduction order.
+  B. Greedy generation (temperature=0) is token-exact between the naive
+     per-step conditioning path and the precompute path.
+  C. Sampled generation with the same seed. Reported as a match rate, not
+     asserted, since one float-level logit flip at a sampling boundary
+     changes the whole continuation.
+  D. With the patches installed but precompute disabled, a greedy run
+     still matches the pristine pre-install run token-exactly. Doubles as
+     a run-to-run determinism check. If D fails, read B as a match rate
+     rather than a bug.
 
-Exit code 0 iff A, B, D pass. Requires a GPU.
+Exit code 0 iff A, B, D pass.
 """
 
 import argparse
@@ -126,11 +125,11 @@ def main():
     results = {"model_path": args.model_path, "seq_len": int(seq_len),
                "param_dtype": str(ref_dtype)}
 
-    # ---- B1: pristine greedy run BEFORE any patch install ----------------
+    # B1: pristine greedy run before any patch install
     out_naive_greedy, t_naive = run_gen(pc=False, temperature=0.0)
     print(f"[B1] pristine naive greedy: {t_naive:.2f}s")
 
-    # ---- A: gamma numerics ------------------------------------------------
+    # A: gamma numerics
     attn = model.net.attn_layers
     T = model.chunk_length
     cond = model._build_dit_condition(
@@ -176,7 +175,7 @@ def main():
         gamma_tol=tol, test_a_pass=a_pass,
     )
 
-    # ---- B2: precompute greedy run ----------------------------------------
+    # B2: precompute greedy run
     out_pc_greedy, t_pc = run_gen(pc=True, temperature=0.0)
     b_pass = torch.equal(out_naive_greedy, out_pc_greedy)
     b_rate = match_rate(out_naive_greedy, out_pc_greedy)
@@ -190,17 +189,17 @@ def main():
         t_naive_greedy_s=t_naive, t_pc_greedy_s=t_pc,
     )
 
-    # ---- D: fallback (patched-but-disabled) vs pristine --------------------
+    # D: fallback (patched but disabled) vs pristine
     out_naive2, t_naive2 = run_gen(pc=False, temperature=0.0)
     d_pass = torch.equal(out_naive_greedy, out_naive2)
     print(f"[D] naive-after-install greedy: {t_naive2:.2f}s  exact: {d_pass}")
     if not d_pass:
-        print("[D] WARNING: baseline run-to-run nondeterminism — read "
+        print("[D] WARNING: baseline run-to-run nondeterminism, read "
               f"Test B as a match rate. rate: "
               f"{match_rate(out_naive_greedy, out_naive2):.6f}")
     results.update(test_d_exact=d_pass, t_naive2_greedy_s=t_naive2)
 
-    # ---- C: sampled, same seed --------------------------------------------
+    # C: sampled, same seed
     out_naive_s, _ = run_gen(pc=False, temperature=args.sampled_temperature,
                              seed=7)
     out_pc_s, _ = run_gen(pc=True, temperature=args.sampled_temperature,

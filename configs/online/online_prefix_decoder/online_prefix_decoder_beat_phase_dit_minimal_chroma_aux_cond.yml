@@ -1,10 +1,10 @@
-# PHASE B: minimal-DiT beat-phase cond + target-stem chroma AUX loss
-# + INPUT-mix chroma DiT conditioning.
+# Minimal-DiT beat-phase cond + target-stem chroma aux loss
+# + input-mix chroma DiT conditioning.
 #
-# Builds on Phase A by feeding the audio-derived input chroma into the same
-# DiT condition channel (summed with the beat-phase projection inside
-# ``_build_dit_condition``). Tests whether explicit harmonic context input
-# helps on top of the aux-loss representational pressure.
+# Builds on the chroma-aux variant by feeding the audio-derived input
+# chroma into the same DiT condition channel (summed with the beat-phase
+# projection inside ``_build_dit_condition``). Tests whether explicit
+# harmonic context input helps on top of the aux-loss pressure.
 
 data_base_dir: "stream_music_gen_data/precompute_audio_mixdown_20s_beat"
 

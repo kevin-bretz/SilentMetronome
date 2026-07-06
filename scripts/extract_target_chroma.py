@@ -1,19 +1,11 @@
-"""Extract per-window TARGET-stem chroma from MIDI for the existing
-precompute_audio_mixdown_20s_beat dataset.
+"""Extract per-window target-stem chroma from MIDI.
 
-For every window dir under
-  ``stream_music_gen_data/precompute_audio_mixdown_20s_beat/{dataset}/{split}/``
-this script:
-
-1. Reads ``metadata.json`` to get ``target_audio_path`` and ``start_frame``.
-2. Maps the audio path to the sibling MIDI path.
-3. Reads the track's ``metadata.yaml`` to flag drum stems (no chroma).
-4. Computes a 12-class active-pitch-class vector per frame at 50 Hz.
-5. Writes ``target_chroma.pt`` (``[T, 12]`` float32) and ``has_chroma.pt``
-   (scalar bool) into the window dir.
-
-Idempotent: skips windows that already have ``target_chroma.pt`` unless
-``--overwrite`` is passed.
+For each window dir, maps the target audio path to its sibling MIDI file,
+flags drum stems (no chroma) via the track's ``metadata.yaml``, computes a
+12-class active-pitch-class vector per frame at 50 Hz and writes
+``target_chroma.pt`` ([T, 12] float32) plus ``has_chroma.pt`` (scalar
+bool). Skips windows that already have the output unless ``--overwrite``
+is passed.
 """
 
 from __future__ import annotations
@@ -70,7 +62,6 @@ def _process_window(window_dir: Path, project_dir: Path, overwrite: bool) -> str
     duration_frames = int(meta.get("duration_frames", 1000))
 
     midi_path = target_audio_path_to_midi_path(target_audio_path)
-    # Resolve relative path against project root.
     if not os.path.isabs(midi_path):
         midi_path = str(project_dir / midi_path)
     track_dir = "/".join(target_audio_path.split("/")[:-2])

@@ -1,23 +1,22 @@
-# PHASE E: PHASE C + strengthened chroma aux loss.
+# Strengthened chroma aux loss.
 #
-# Same as Phase C (full DiT beat-phase cond + chroma aux head, no chroma
-# DiT cond) but with the four aux-loss strengtheners enabled:
+# Same as the plain chroma-aux config (full DiT beat-phase cond + chroma
+# aux head, no chroma DiT cond) but with four aux-loss strengtheners:
 #
-#   #1  Linear projection head (replaces 2-layer MLP). Pushes the
+#   Linear projection head (replaces 2-layer MLP). Pushes the
 #       representation pressure from the head into the trunk.
-#   #2  Hybrid MSE + cosine loss. Cosine pressures direction (chroma
-#       *shape*); MSE pressures magnitude. 0.5/0.5 mix.
-#   #4  Multi-horizon prediction at frames {0, +4, +8, +16} (now,
-#       +80 ms, +160 ms, +320 ms). Forces the trunk to encode short
-#       lookahead, not just current pitch class.
-#   #5  Deep supervision at transformer layers 8 and 12 (mid + late
-#       trunk in the 16-layer model). Gradient pressure earlier in the
-#       trunk, not only at the top.
+#   Hybrid MSE + cosine loss, 0.5/0.5 mix. Cosine pressures direction
+#       (chroma shape), MSE pressures magnitude.
+#   Multi-horizon prediction at frames {0, +4, +8, +16} (now, +80 ms,
+#       +160 ms, +320 ms). Forces the trunk to encode short lookahead,
+#       not just current pitch class.
+#   Deep supervision at transformer layers 8 and 12 (mid + late trunk in
+#       the 16-layer model). Gradient pressure earlier in the trunk, not
+#       only at the top.
 #
-# 200K from-scratch, matched to Phase C config so the only variable is
-# "+ aux-loss strengtheners". A/B answer: do the strengtheners help in
-# isolation, before we apply the same ideas to multipitch / CQT aux
-# heads in later phases.
+# 200K from-scratch, matched to the plain chroma-aux config so the only
+# variable is the strengtheners, testing them in isolation before
+# applying the same ideas to the multipitch / CQT aux heads.
 
 data_base_dir: "stream_music_gen_data/precompute_audio_mixdown_20s_beat"
 

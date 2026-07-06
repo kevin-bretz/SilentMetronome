@@ -212,7 +212,7 @@ def main():
     )
     args = parser.parse_args()
 
-    # Map split name (e.g., "valid" → "validation" for slakh2100)
+    # Map split name (e.g., "valid" to "validation" for slakh2100)
     split_dir_name = DATASET_SPLITS.get(args.dataset, {}).get(args.split, args.split)
 
     data_dir = Path(args.data_base_dir) / split_dir_name

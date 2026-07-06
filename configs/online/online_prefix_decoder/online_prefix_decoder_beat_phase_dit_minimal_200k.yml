@@ -1,4 +1,4 @@
-# DiT-style per-layer beat-phase conditioning MIXIN — MINIMAL variant,
+# DiT-style per-layer beat-phase conditioning mixin, minimal variant,
 # matched-schedule 200K version.
 #
 # Identical to ``..._beat_phase_dit_minimal.yml`` except the schedule is

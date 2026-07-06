@@ -1,21 +1,14 @@
 """Utilities for computing per-frame multi-pitch (piano roll) signals.
 
 Companion to ``chroma_utils.py``. Multipitch carries strictly more
-information than chroma: it preserves both pitch class AND register, AND
-preserves note-event structure (transitions are explicit bit flips).
+information than chroma. It preserves register (C4 vs C5 are different
+bins), keeps note-event structure as explicit bit flips, and captures
+drum sounds, since slakh drum stems use GM channel 10 where the note
+number identifies the drum sound (kick=36, snare=38, hi-hat=42, etc.).
 
-Compared to chroma:
-  * 128-dim binary instead of 12-dim float — note number resolution
-  * Captures register (C4 vs C5 are different bins)
-  * Captures drum sounds (slakh drum stems use MIDI channel 10 where the
-    note number IS the drum-sound identity per the General MIDI standard
-    -- kick=36, snare=38, hi-hat=42, crash=49, etc.)
-
-The full 128-dim covers the entire MIDI range (0-127). Drum sounds live
-in the 35-81 range; pitched instrument fundamentals span ~21-108. Using
-the full 128 dim is uniform across all stem types, with the
-``dec_inst_tokens`` carrying the context needed to interpret the active
-bins (drum vs pitched).
+The full 128 dims cover the entire MIDI range uniformly across stem
+types, with ``dec_inst_tokens`` providing the context to interpret the
+active bins as drum vs pitched.
 
 Output is ``[T, 128]`` ``uint8`` (binary {0, 1}) at 50 Hz frame rate to
 match ``beat_cond.pt`` / ``target_chroma.pt``. uint8 saves ~4x storage
@@ -114,12 +107,10 @@ def compute_multipitch_from_midi(
     ``has_notes`` is False when the MIDI is missing, unparseable, or
     contains no notes overlapping the requested window.
 
-    NOTE on drums: This function does NOT filter drum stems. For drum
-    stems, the MIDI note number is the drum-sound identity (GM channel 10
-    convention; 36=kick, 38=snare, 42=closed-hat, etc.). The 128-dim
-    binary output naturally encodes which drum sounds are active at each
-    frame. The caller / model uses the instrument-token context to
-    interpret the bins appropriately.
+    Drum stems are not filtered. Their MIDI note numbers identify drum
+    sounds (GM channel 10, 36=kick, 38=snare, etc.), so the 128-dim output
+    encodes which drum sounds are active and the caller uses the
+    instrument-token context to interpret the bins.
     """
     starts, ends, pitches, velocities = _parse_midi_notes(midi_path)
     return _rasterize_notes(
@@ -143,9 +134,9 @@ def compute_multipitch_from_midis(
       multipitch[t, p] = 1 if any input stem has that note active
       velocity[t, p]   = max velocity over input stems
 
-    Drum stems are included — their channel-10 note numbers will populate
-    the typical drum-sound bin range (35-81). Caller filters drums via
-    the dataset metadata if desired.
+    Drum stems are included. Their channel-10 note numbers populate the
+    typical drum-sound bin range (35-81), and the caller filters drums
+    via the dataset metadata if desired.
 
     Returns (multipitch, velocity, has_any) where has_any is True if at
     least one stem contributed any note overlapping the window.
@@ -172,8 +163,8 @@ def target_audio_path_to_midi_path(target_audio_path: str) -> str:
     """Map a slakh target/input-stem flac path to its sibling MIDI path.
 
     `<...>/Track01819/stems/S07.flac` -> `<...>/Track01819/MIDI/S07.mid`
-    Mirror of ``chroma_utils.target_audio_path_to_midi_path``; duplicated
-    here to keep multipitch_utils self-contained for callers.
+    Mirror of ``chroma_utils.target_audio_path_to_midi_path``, duplicated
+    to keep multipitch_utils self-contained for callers.
     """
     p = Path(target_audio_path)
     return str(p.parent.parent / "MIDI" / (p.stem + ".mid"))

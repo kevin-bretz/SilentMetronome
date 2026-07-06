@@ -1,14 +1,12 @@
-# PHASE F: full-cond DiT beat-phase cond + multipitch aux + CQT aux.
+# Full-cond DiT beat-phase cond + multipitch aux + CQT aux.
 #
-# Cond side:  full DiT beat-phase cond (phase + per-frame BPM + global BPM
-#             + bar position + time signature). Same as Phase C cond.
-# Aux side:   target-stem multipitch (BCE on presence + masked MSE on
-#             velocity) AND target-stem CQT (MSE+cos on 84-bin log-mag).
-# Tests whether richer aux supervision (note identity + spectral envelope)
-# on top of explicit beat-phase cond improves over Phase C (chroma aux
-# only). Run-F vs Run-G isolates "cond + rich aux" vs "rich aux only" —
-# answers whether explicit periodic conditioning is still needed when
-# multipitch + CQT + beat-phase aux pressure is on.
+# The cond side is the full DiT beat-phase cond (phase + per-frame BPM +
+# global BPM + bar position + time signature). The aux side supervises
+# target-stem multipitch (BCE on presence + masked MSE on velocity) and
+# target-stem CQT (MSE+cos on 84-bin log-mag). Tests whether richer aux
+# supervision (note identity + spectral envelope) on top of explicit
+# beat-phase cond improves over the chroma-aux-only recipe. Compared with
+# the aux-only variant, this isolates cond + rich aux vs rich aux only.
 
 data_base_dir: "stream_music_gen_data/precompute_audio_mixdown_20s_beat"
 

@@ -1,10 +1,10 @@
-# PHASE A: minimal-DiT beat-phase conditioning + target-stem chroma AUX loss.
+# Minimal-DiT beat-phase conditioning + target-stem chroma aux loss.
 #
-# Beat: minimal DiT cond (4-dim phase + 1-dim per-frame local BPM only).
-# Chroma: aux head ONLY (predicts target_chroma from pre-logits hidden state),
-#         no chroma DiT conditioning.
-# 200K cosine schedule, matched to the minimal-DiT-200K baseline so the only
-# variable is "+ chroma aux loss".
+# Beat uses the minimal DiT cond (4-dim phase + 1-dim per-frame local BPM
+# only). Chroma is aux head only (predicts target_chroma from the
+# pre-logits hidden state) with no chroma DiT conditioning. 200K cosine
+# schedule, matched to the minimal-DiT-200K baseline so the only variable
+# is the added chroma aux loss.
 
 data_base_dir: "stream_music_gen_data/precompute_audio_mixdown_20s_beat"
 

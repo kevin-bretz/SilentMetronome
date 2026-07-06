@@ -1,17 +1,10 @@
-"""Extract per-window INPUT-mix CQT from audio.
+"""Extract per-window input-mix CQT from audio.
 
-Companion to ``extract_input_chroma.py``. For each window dir:
-
-1. Reads ``metadata.json`` for ``input_audio_path`` (list) and ``start_frame``.
-2. Reads only the [start_sample, start_sample + window_samples) slice of
-   each input stem FLAC, sums to get input mix.
-3. Computes log-magnitude CQT at 84 bins / 7 octaves starting at C1.
-4. Writes ``input_cqt.pt`` (float16 [T, 84]) into the window dir.
-
-Inference-time recoverable: works on any audio (CQT is just log-frequency
-spectrogram), so this can be a real cond input at inference unlike
-``input_multipitch`` which would require audio multi-pitch transcription.
-
+Companion to ``extract_input_chroma.py``. For each window dir, reads the
+window slice of each input stem FLAC, sums to the input mix, computes a
+log-magnitude CQT (84 bins, 7 octaves from C1) and writes ``input_cqt.pt``
+(float16 [T, 84]). Unlike ``input_multipitch`` this is computable from any
+audio, so it can serve as a real conditioning input at inference time.
 Idempotent.
 """
 

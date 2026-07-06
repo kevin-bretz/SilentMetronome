@@ -100,11 +100,11 @@ class LitOnlinePrefixDecoderMultiOut(BaseLightningModel):
         use_cqt_future_aux_head: bool = False,
         cqt_future_aux_head_hidden_dim: int = 256,
         cqt_future_aux_head_weight: float = 1.0,
-        # Phase K: future target-stem token aux head (CE on patterned tokens).
+        # Future target-stem token aux head (CE on patterned tokens).
         use_target_token_future_aux_head: bool = False,
         target_token_future_aux_head_hidden_dim: int = 256,
         target_token_future_aux_head_weight: float = 1.0,
-        # Phase L: same task as Phase K but sharing the main ``to_logits``.
+        # Same task as above but sharing the main ``to_logits`` classifier.
         use_coupled_target_token_future_head: bool = False,
         coupled_target_token_future_head_hidden_dim: int = 256,
         coupled_target_token_future_head_weight: float = 1.0,
@@ -300,9 +300,9 @@ class LitOnlinePrefixDecoderMultiOut(BaseLightningModel):
         self.model = OnlinePrefixDecoderTransformerMultiOut(**model_kwargs)
 
         # KL knowledge distillation setup. The teacher mirrors the student
-        # architecturally except for ``future_visibility``. We construct it
-        # before ``compile`` so neither model is compiled when teacher loads
-        # state_dict (avoids ``_orig_mod.`` reconciliation).
+        # architecturally except for ``future_visibility``, and is built
+        # before ``compile`` so neither model is compiled when the teacher
+        # loads its state_dict (avoids ``_orig_mod.`` reconciliation).
         self.kd_teacher_ckpt = str(kd_teacher_ckpt or "")
         self.kd_teacher_fv = int(kd_teacher_fv)
         self.kd_beta = float(kd_beta)
@@ -402,7 +402,7 @@ class LitOnlinePrefixDecoderMultiOut(BaseLightningModel):
             for k in unexpected[:10]:
                 print(f"    {k}")
             raise ValueError(
-                "Teacher state_dict has unexpected keys — teacher arch does "
+                "Teacher state_dict has unexpected keys, teacher arch does "
                 "not match the checkpoint. Aborting to avoid silent corruption."
             )
         if missing:
@@ -640,8 +640,8 @@ class LitOnlinePrefixDecoderMultiOut(BaseLightningModel):
         return (bce_per * w).sum() / denom_b
 
     def _cqt_loss(self, pred, target):
-        """MSE+cos on CQT log-magnitude (no has_mask — every window has
-        a CQT target since drums don't lack spectra).
+        """MSE+cos on CQT log-magnitude. No has_mask needed, every window
+        has a CQT target since drums don't lack spectra.
         """
         target = target.to(pred.dtype)
         mse = F.mse_loss(pred, target)
@@ -667,13 +667,13 @@ class LitOnlinePrefixDecoderMultiOut(BaseLightningModel):
             phase_pred.float(), phase_target.float(), dim=-1, eps=1e-8
         ).mean()
         phase_loss = 0.5 * mse + 0.5 * cos
-        # Bpm MSE — broadcast bpm_log [B] -> [B, S].
+        # Bpm MSE, broadcasting bpm_log [B] -> [B, S].
         if bpm_log is None:
             bpm_loss = bpm_pred.new_zeros(())
         else:
             bpm_target = bpm_log.to(bpm_pred.dtype).unsqueeze(-1).expand_as(bpm_pred)
             bpm_loss = F.mse_loss(bpm_pred, bpm_target)
-        # Time-sig CE — broadcast time_sig_num [B] -> [B, S].
+        # Time-sig CE, broadcasting time_sig_num [B] -> [B, S].
         if time_sig_num is None:
             ts_loss = ts_logits.new_zeros(())
         else:
@@ -982,9 +982,9 @@ class LitOnlinePrefixDecoderMultiOut(BaseLightningModel):
             and "coupled_tt_future_target" in extra_aux
             and "coupled_tt_future_logits_mask" in extra_aux
         ):
-            # Same shapes/contract as Phase K block — only difference is the
-            # prediction came through the SHARED main ``to_logits`` instead
-            # of a dedicated classifier.
+            # Same shapes/contract as the block above. The only difference is
+            # that the prediction came through the shared main ``to_logits``
+            # instead of a dedicated classifier.
             pred = extra_aux["coupled_tt_future_pred"]
             tgt = extra_aux["coupled_tt_future_target"]
             mask = extra_aux["coupled_tt_future_logits_mask"]
@@ -1129,13 +1129,10 @@ class LitOnlinePrefixDecoderMultiOut(BaseLightningModel):
             torch.tensor(0.0, device=loss.device), log_d, extra_aux,
             target_has_multipitch, bpm_log, time_sig_num, prefix="val",
         )
-        # Beat-phase conditioner diagnostics — logged once per validation epoch
-        # (cheap at this cadence). These are go/no-go signals distinguishing
-        # architectural from hyperparameter problems:
-        #   - If `beat_gate_abs_max` stays near 0 throughout training, the
-        #     conditioner is "dead" (architectural problem).
-        #   - If `beat_mlp_out_w_norm` stays at its init value, the conditioner
-        #     MLP isn't learning (architectural or gradient-flow issue).
+        # Beat-phase conditioner diagnostics, logged once per validation
+        # epoch. If `beat_gate_abs_max` stays near 0 the conditioner is dead,
+        # and if `beat_mlp_out_w_norm` stays at its init value the conditioner
+        # MLP is not learning.
         if self.use_beat_phase and batch_idx == 0:
             bc = self._get_inner_model().beat_conditioner
             gate = bc.gate.detach()

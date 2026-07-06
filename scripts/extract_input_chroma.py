@@ -1,18 +1,11 @@
-"""Extract per-window INPUT-mix chroma for the existing
-precompute_audio_mixdown_20s_beat dataset.
+"""Extract per-window input-mix chroma for a precomputed window dataset.
 
-Strategy: read only the [start_sample, start_sample + window_samples) slice
-of each input stem's source FLAC, mix down, run librosa.chroma_cqt at the
-source sample rate, save ``input_chroma.pt`` ([T, 12] float32) into the
-window dir.
-
-This works uniformly for train/valid/test — train windows lack the
-precomputed ``input_audio.pt`` (the dump pipeline didn't save audio for
-train), but we never needed it: source FLACs have the data and slice-reads
-are cheap (~30ms per stem slice via soundfile).
-
-HPSS is opt-in. Idempotent: skips windows that already have ``input_chroma.pt``
-unless ``--overwrite`` is passed.
+Reads the window slice of each input stem directly from the source FLACs,
+mixes them down, runs librosa.chroma_cqt at the source sample rate and
+saves ``input_chroma.pt`` ([T, 12] float32) into the window dir. Reading
+from the source FLACs also covers train windows, which have no precomputed
+``input_audio.pt``. HPSS is opt-in. Skips windows that already have the
+output unless ``--overwrite`` is passed.
 """
 
 from __future__ import annotations
@@ -95,13 +88,11 @@ def _process_window(
     duration_frames = int(meta.get("duration_frames", 1000))
     frame_rate_hz = int(meta.get("frame_rate_hz", FRAME_RATE_HZ))
 
-    # Resolve relative paths.
     abs_paths = [
         p if os.path.isabs(p) else str(project_dir / p)
         for p in input_audio_paths
     ]
 
-    # Probe sample rate from the first existing stem.
     sr_probe = 0
     for p in abs_paths:
         try:
@@ -121,8 +112,7 @@ def _process_window(
     for p in abs_paths:
         slc, sr = _read_slice(p, start_sample, num_samples)
         if sr != sr_probe or sr == 0:
-            # Sample-rate mismatch across stems is unexpected for slakh; skip
-            # this stem rather than risking a bad mix.
+            # Skip stems whose sample rate disagrees rather than risk a bad mix.
             continue
         mix += slc
         n_loaded += 1

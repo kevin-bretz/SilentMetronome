@@ -1,15 +1,14 @@
-# PHASE G: NO beat-phase cond input — beat-phase aux (full feature set)
-#         + multipitch aux + CQT aux.
+# No beat-phase cond input. Beat-phase aux (full feature set)
+# + multipitch aux + CQT aux.
 #
-# Cond side:  none. The model gets only the input audio embedding.
-# Aux side:   beat-phase aux head FULL (predicts sin/cos beat+bar phase
-#             via MSE+cos, log-bpm via MSE, time-sig numerator via CE)
-#             + multipitch aux (BCE presence + masked MSE velocity)
-#             + CQT aux (MSE+cos on 84-bin log-mag).
-# Periodic encoding for the phase target (sin/cos), matching the cond
-# version's signal structure. Tests whether rich aux supervision can
-# replace explicit periodic conditioning — if Run G matches or beats
-# Run F, conditioning input is unnecessary.
+# No conditioning, the model gets only the input audio embedding. The aux
+# side is the full beat-phase head (sin/cos beat+bar phase via MSE+cos,
+# log-bpm via MSE, time-sig numerator via CE) + multipitch aux (BCE
+# presence + masked MSE velocity) + CQT aux (MSE+cos on 84-bin log-mag).
+# The phase target keeps the sin/cos encoding of the cond version's
+# signal. Tests whether rich aux supervision can replace explicit
+# periodic conditioning. If this matches or beats the cond + aux run,
+# the conditioning input is unnecessary.
 
 data_base_dir: "stream_music_gen_data/precompute_audio_mixdown_20s_beat"
 
@@ -25,7 +24,7 @@ LinearWarmupCosineDecay.warmup_iters: 10000
 LinearWarmupCosineDecay.total_iters: 200000
 LinearWarmupCosineDecay.eta_min: !!float 1e-5
 
-# Model: NO beat cond, NO chroma anything; ALL aux heads on.
+# Model: no beat cond, no chroma anything, all aux heads on.
 OnlinePrefixDecoderTransformerMultiOut.use_beat_phase: false
 OnlinePrefixDecoderTransformerMultiOut.use_beat_phase_dit_cond: false
 OnlinePrefixDecoderTransformerMultiOut.time_sig_vocab_size: 16

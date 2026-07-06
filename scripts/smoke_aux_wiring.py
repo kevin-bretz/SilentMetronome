@@ -1,9 +1,9 @@
-"""Lean smoke test for new aux heads (multipitch / CQT / beat-phase-full).
+"""Smoke test for the aux heads (multipitch / CQT / beat-phase-full).
 
-No Lightning, no dataset, no wandb — just instantiate the model with the
-relevant flags, run forward + backward on synthetic tensors, and assert
-losses are finite. Catches shape/dtype/dead-tensor bugs before any 200K
-training run is committed.
+No Lightning, no dataset, no wandb. Instantiates the model with the
+relevant flags, runs forward and backward on synthetic tensors and asserts
+losses are finite and every aux head receives gradient. Catches
+shape/dtype/dead-tensor bugs before committing to a long training run.
 
 Usage:
     python scripts/smoke_aux_wiring.py
@@ -81,7 +81,6 @@ def run_phase(label, model_kwargs):
 
     print(f"logits.shape={tuple(logits.shape)}  targets.shape={tuple(targets.shape)}")
 
-    # CE loss on logits.
     ce = F.cross_entropy(logits[logits_mask], targets[logits_mask])
     print(f"ce_loss={ce.item():.4f}")
     assert torch.isfinite(ce), "CE loss not finite"
@@ -153,9 +152,8 @@ def run_phase(label, model_kwargs):
 
 
 def main():
-    # Phase F: DiT cond + multipitch + cqt aux.
     run_phase(
-        "PHASE F (cond + mp + cqt)",
+        "cond + mp + cqt",
         dict(
             use_beat_phase_dit_cond=True,
             beat_dit_cond_mlp_expansion=4,
@@ -168,9 +166,8 @@ def main():
         ),
     )
 
-    # Phase G: NO cond. multipitch + cqt + beat-full aux.
     run_phase(
-        "PHASE G (mp + cqt + beat-full aux, no cond)",
+        "mp + cqt + beat-full aux, no cond",
         dict(
             use_multipitch_aux_head=True,
             multipitch_aux_head_hidden_dim=256,
@@ -183,9 +180,8 @@ def main():
         ),
     )
 
-    # Phase H: Phase F + input-mix CQT aux head.
     run_phase(
-        "PHASE H (cond + mp + cqt + input_cqt)",
+        "cond + mp + cqt + input_cqt",
         dict(
             use_beat_phase_dit_cond=True,
             beat_dit_cond_mlp_expansion=4,
@@ -201,9 +197,8 @@ def main():
         ),
     )
 
-    # Phase CD: Phase F + cond dropout p=0.15 (CFG-style).
     run_phase(
-        "PHASE CD (cond + mp + cqt + cond_dropout p=0.15)",
+        "cond + mp + cqt + cond_dropout p=0.15",
         dict(
             use_beat_phase_dit_cond=True,
             beat_dit_cond_mlp_expansion=4,
@@ -217,7 +212,7 @@ def main():
         ),
     )
 
-    print("\n[smoke] ALL PHASES PASSED")
+    print("\n[smoke] all configurations passed")
 
 
 if __name__ == "__main__":

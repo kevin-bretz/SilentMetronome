@@ -195,7 +195,7 @@ def compute_beat_phase_frames(
             ts_nums_slice.max() != ts_nums_slice.min()
         )
     else:
-        # Window falls between beats (very short track?) — fall back to global.
+        # Window falls between beats (very short track?), fall back to global.
         bpm_mean = float(np.mean(tempo_bpm))
         num_beats_in_window = 0
         downbeats_in_window = 0

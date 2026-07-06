@@ -1,23 +1,13 @@
-"""Extract per-window TARGET-stem multipitch + velocity from MIDI for the
-existing precompute_audio_mixdown_20s_beat dataset.
+"""Extract per-window target-stem multipitch and velocity from MIDI.
 
-Mirrors ``extract_target_chroma.py`` in structure. For each window dir:
-
-1. Reads ``metadata.json`` for ``target_audio_path`` and ``start_frame``.
-2. Maps audio path → sibling MIDI path.
-3. Computes 128-class binary piano roll + velocity per frame at 50 Hz.
-4. Writes:
-     - ``target_multipitch.pt`` (uint8 [T, 128] in {0, 1})
-     - ``target_velocity.pt`` (uint8 [T, 128] in 0-127)
-     - ``target_has_multipitch.pt`` (scalar bool)
-
-Drums are NOT filtered. Drum stems use GM channel 10 where note number
-encodes the drum sound; the 128-dim representation captures this. The
-model uses ``dec_inst_tokens`` to disambiguate "note number 36 = C2"
-(piano) vs "note number 36 = kick" (drums).
-
-Idempotent: skips windows that already have all three output files unless
-``--overwrite``.
+Mirrors ``extract_target_chroma.py``. For each window dir, maps the target
+audio path to its sibling MIDI file, computes a 128-class binary piano
+roll plus velocity per frame at 50 Hz and writes ``target_multipitch.pt``
+(uint8 [T, 128] in {0, 1}), ``target_velocity.pt`` (uint8 [T, 128] in
+0-127) and ``target_has_multipitch.pt`` (scalar bool). Drums are not
+filtered. GM channel 10 encodes the drum sound in the note number, and
+``dec_inst_tokens`` disambiguates pitched vs drum note numbers downstream.
+Skips windows that already have all three outputs unless ``--overwrite``.
 """
 
 from __future__ import annotations

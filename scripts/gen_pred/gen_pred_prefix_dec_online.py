@@ -97,8 +97,8 @@ def generate_prediction(
     # Inference-time ablations on the beat-phase signal. zero_beat_cond replaces
     # the per-frame phase with all zeros (still valid sin/cos for "no phase"),
     # bpm_log with 0 (=120 BPM), and time_sig_num with 4. shuffle_beat_cond
-    # permutes phase/bpm/time-sig across the batch — keeps the marginal signal
-    # distribution but pairs each window with another window's grid.
+    # permutes phase/bpm/time-sig across the batch, keeping the marginal
+    # signal distribution but pairing each window with another window's grid.
     if zero_beat_cond:
         if beat_cond is not None:
             beat_cond = torch.zeros_like(beat_cond)
@@ -132,7 +132,6 @@ def generate_prediction(
             if tempo_change is not None:
                 tempo_change = torch.zeros_like(tempo_change)
 
-    # NOTE: do not support prompting in online prefix decoder for now.
     if prompt_secs > 0:
         raise NotImplementedError(
             "Prompt is not supported in online prefix decoder for now."

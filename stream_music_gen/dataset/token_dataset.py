@@ -229,8 +229,8 @@ class PrecomputedTokenDataset(Dataset):
             **metadata,
         }
 
-        # -- Beat-phase conditioning (optional; only present in the
-        #    `precompute_audio_mixdown_20s_beat` data root).
+        # Beat-phase conditioning, optional. Only present in the
+        # `precompute_audio_mixdown_20s_beat` data root.
         beat_cond_path = data_dir / "beat_cond.pt"
         if beat_cond_path.exists():
             beat_cond = torch.load(beat_cond_path, weights_only=True).float()
@@ -260,23 +260,22 @@ class PrecomputedTokenDataset(Dataset):
             # indices within the window where beats occur). Between consecutive
             # beats, local_BPM = 60 / interval_sec where interval_sec =
             # (next_beat_frame - prev_beat_frame) / frame_rate_hz. Frames
-            # before the first beat use the first interval; after the last
-            # beat, use the last interval. Falls back to bpm_mean for the
-            # whole window if beat_frames are missing.
+            # before the first beat use the first interval and frames after
+            # the last beat use the last interval. Falls back to bpm_mean
+            # for the whole window if beat_frames are missing.
             beat_frames = metadata.get("beat_frames_in_window", None)
             frame_rate = float(metadata.get("frame_rate_hz", 50))
             bpm_mean_for_log = float(metadata.get("bpm_mean", 120.0))
             if beat_frames and len(beat_frames) >= 2 and frame_rate > 0:
                 bf = np.asarray(beat_frames, dtype=np.float64)
-                # interval (in frames) at each beat boundary; use forward diff
+                # interval (in frames) at each beat boundary, forward diff
                 intervals = np.diff(bf)
                 # local BPM at beat i = 60 / (interval[i] / frame_rate)
                 bpm_at_beat = 60.0 * frame_rate / np.clip(intervals, 1e-3, None)
-                # Map each frame to a "bracketing" beat: piecewise-constant
-                # local BPM (the BPM of the interval that contains it).
-                # Frames before bf[0] → bpm_at_beat[0];
-                # frames in [bf[i], bf[i+1]) → bpm_at_beat[i];
-                # frames at/after bf[-1] → bpm_at_beat[-1].
+                # Map each frame to its bracketing beat interval, giving
+                # piecewise-constant local BPM. Frames before bf[0] take
+                # bpm_at_beat[0], frames in [bf[i], bf[i+1]) take
+                # bpm_at_beat[i], frames at/after bf[-1] take bpm_at_beat[-1].
                 local_bpm = np.full(T, bpm_at_beat[-1], dtype=np.float64)
                 # Frames before first beat
                 first_bf = int(np.floor(bf[0]))
@@ -297,8 +296,8 @@ class PrecomputedTokenDataset(Dataset):
                 )
             item["local_bpm_log"] = torch.from_numpy(local_bpm_log).float()
 
-        # -- Chroma signals (optional; present after running
-        #    extract_target_chroma.py / extract_input_chroma.py).
+        # Chroma signals, optional. Present after running
+        # extract_target_chroma.py / extract_input_chroma.py.
         target_chroma_path = data_dir / "target_chroma.pt"
         if target_chroma_path.exists():
             target_chroma = torch.load(
@@ -322,9 +321,9 @@ class PrecomputedTokenDataset(Dataset):
             ).float()[: self.max_frame_length]
             item["input_chroma"] = input_chroma
 
-        # -- Multipitch (presence + velocity) and CQT (log-magnitude). All
-        #    optional, present only after running extract_target_multipitch.py
-        #    / extract_target_cqt.py against the precomputed window root.
+        # Multipitch (presence + velocity) and CQT (log-magnitude). All
+        # optional, present only after running extract_target_multipitch.py
+        # / extract_target_cqt.py against the precomputed window root.
         target_multipitch_path = data_dir / "target_multipitch.pt"
         if target_multipitch_path.exists():
             mp = torch.load(

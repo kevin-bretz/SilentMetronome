@@ -1,10 +1,8 @@
-"""Smoke test for the DiT (per-layer adaptive layer-norm + scale) beat-phase
-conditioning path. Verifies:
-  1. The model instantiates with use_beat_phase_dit_cond=True.
-  2. A training-mode forward pass with random beat_cond produces finite logits
-     of the expected shape.
-  3. A tiny generate() runs end-to-end without crashing.
-  4. The DiT-related parameters are present and live in the parameter list.
+"""Smoke test for the DiT (per-layer adaptive layer-norm and scale)
+beat-phase conditioning path. Checks that the model instantiates with
+use_beat_phase_dit_cond=True, that a forward pass with random beat_cond
+produces finite logits of the expected shape, that a tiny generate() runs
+end-to-end, and that the DiT parameters are present in the parameter list.
 
 Usage:
     python scripts/smoke_test_dit_cond.py
@@ -22,15 +20,15 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float32  # smoke test in fp32 for clearest signal
 
-    # Tiny config — small enough to run on CPU in a few seconds, but large
-    # enough that depth>1 actually exercises the per-layer adaptive norms.
+    # Tiny config, small enough to run on CPU in a few seconds but with
+    # depth>1 so the per-layer adaptive norms are actually exercised.
     dim = 64
     depth = 4
     heads = 8  # must be divisible by project default attn_kv_heads=8
     num_tokens = 1025  # +1 for pad
     num_rvq_layers = 4
     chunk_length = 5
-    max_duration_frames = 25  # 5 chunks × 5 frames each
+    max_duration_frames = 25  # 5 chunks x 5 frames each
     input_emb_dim = 8
 
     model = OnlinePrefixDecoderTransformerMultiOut(
@@ -52,7 +50,7 @@ def main():
     ).to(device=device, dtype=dtype)
     model.eval()
 
-    # -- Step 1: parameter sanity ---------------------------------------------
+    # Step 1: parameter sanity
     has_projector = any(
         n.startswith("beat_cond_projector.") for n, _ in model.named_parameters()
     )
@@ -65,12 +63,11 @@ def main():
     assert has_projector
     assert has_ada_ln_to_gamma
 
-    # -- Step 2: forward pass --------------------------------------------------
+    # Step 2: forward pass
     B, T = 2, max_duration_frames
     x = torch.randint(0, num_tokens, (B, num_rvq_layers, T), device=device)
-    # inst_tokens: one instrument id per batch item (shape [B], long).
-    # Mirrors the production lit module's
-    # ``dec_inst_tokens = torch.tensor(batch["target_inst_token"])``.
+    # One instrument id per batch item (shape [B], long), matching how the
+    # lit module builds dec_inst_tokens.
     inst_tokens = torch.zeros((B,), dtype=torch.long, device=device)
     input_emb = torch.randn(B, T, input_emb_dim, device=device, dtype=dtype)
 
@@ -105,7 +102,7 @@ def main():
     assert logits.shape[2] == chunk_length
     assert aux_pred is None and aux_target is None
 
-    # -- Step 3: a tiny generate() --------------------------------------------
+    # Step 3: a tiny generate()
     # Cap to one chunk so the test runs quickly.
     gen_seq_len = chunk_length
     with torch.no_grad():
@@ -131,12 +128,10 @@ def main():
     assert gen.shape[1] == num_rvq_layers
     assert gen.shape[2] > 0
 
-    # -- Step 4: confirm it runs WITHOUT beat_cond too (backward compat) -----
-    # When beat_cond=None and DiT cond is on, the helper returns None and we
-    # should fall through to a normal decoder call. That call will still try
-    # to invoke AdaptiveLayerNorm without a condition — which would error.
-    # So when DiT cond is enabled, beat_cond is REQUIRED. Verify the failure
-    # mode is loud (assertion or KeyError), not silent.
+    # Step 4: forward without beat_cond
+    # With DiT cond enabled, beat_cond is required. AdaptiveLayerNorm cannot
+    # run without a condition, so verify the failure mode is loud (assertion
+    # or KeyError) rather than a silent fall-through.
     threw = False
     try:
         with torch.no_grad():
@@ -152,7 +147,7 @@ def main():
     if not threw:
         print(
             "[4] WARNING: DiT-cond model accepted a forward pass with no "
-            "beat_cond. This is silent failure — it means AdaptiveLayerNorm "
+            "beat_cond. This is a silent failure, AdaptiveLayerNorm "
             "fell through somehow. Investigate."
         )
 
@@ -160,7 +155,7 @@ def main():
 
 
 def test_minimal():
-    """Smoke test the MINIMAL variant: only beat_cond + local_bpm_log fed in."""
+    """Smoke test the minimal variant, which feeds only beat_cond and local_bpm_log."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float32
 
@@ -195,14 +190,13 @@ def test_minimal():
         logits, lm, _, _, _, _, _ = model(
             x=x, inst_tokens=inst, input_emb=ie,
             beat_cond=bc, local_bpm_log=lbpm,
-            # Pass dummy (or omit) global signals — projector ignores them in minimal mode.
+            # The projector ignores global signals in minimal mode.
             bpm_log=torch.zeros(B, device=device, dtype=dtype),
             time_sig_num=torch.full((B,), 4, dtype=torch.long, device=device),
         )
     assert torch.isfinite(logits[lm]).all()
     print(f"[MIN-2] forward OK, logits {tuple(logits.shape)}")
 
-    # Generate
     gen_seq_len = chunk_length
     with torch.no_grad():
         gen = model.generate(
@@ -221,7 +215,7 @@ def test_minimal():
 
 
 def test_aux_only():
-    """Smoke test the AUX-ONLY variant: no DiT cond, only the aux head
+    """Smoke test the aux-only variant, no DiT cond, just the aux head
     predicting beat_cond from hidden states."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float32
@@ -258,7 +252,7 @@ def test_aux_only():
             beat_cond=bc,
         )
     assert aux_pred is not None and aux_target is not None
-    # S = context_end_idx + chunk_length; context_end_idx is random so just check rank/last dim.
+    # context_end_idx is random, so only check rank and last dim.
     assert aux_pred.dim() == 3 and aux_pred.shape[0] == B and aux_pred.shape[-1] == 4
     assert aux_pred.shape == aux_target.shape
     assert torch.isfinite(aux_pred).all()
@@ -280,7 +274,7 @@ def test_aux_only():
 
 
 def test_aux_combined():
-    """Smoke test AUX + DiT cond combined."""
+    """Smoke test the aux head and DiT cond combined."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float32
 
@@ -323,7 +317,7 @@ def test_aux_combined():
 
 
 def test_chroma_aux_with_minimal_dit():
-    """Smoke test PHASE A: minimal DiT beat cond + chroma aux head only."""
+    """Smoke test minimal DiT beat cond with the chroma aux head only."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float32
     dim = 64; depth = 4; heads = 8; num_tokens = 1025
@@ -347,7 +341,7 @@ def test_chroma_aux_with_minimal_dit():
     )
     assert has_chroma_aux, "expected chroma_aux_head params"
     assert not has_chroma_proj, "Phase A: chroma cond should be off"
-    print("[PHASE-A-1] chroma aux head present, no chroma cond projector")
+    print("[aux-only-1] chroma aux head present, no chroma cond projector")
 
     B, T = 2, max_duration_frames
     x = torch.randint(0, num_tokens, (B, num_rvq_layers, T), device=device)
@@ -368,12 +362,12 @@ def test_chroma_aux_with_minimal_dit():
     assert c_pred is not None and c_tgt is not None
     assert c_pred.shape == c_tgt.shape and c_pred.shape[-1] == 12
     assert torch.isfinite(c_pred).all()
-    print(f"[PHASE-A-2] forward OK, chroma_aux_pred {tuple(c_pred.shape)}")
-    print("PHASE A SMOKE PASSED")
+    print(f"[aux-only-2] forward OK, chroma_aux_pred {tuple(c_pred.shape)}")
+    print("aux-only smoke passed")
 
 
 def test_chroma_cond_aux_combined():
-    """Smoke test PHASE B: minimal DiT beat cond + chroma aux + chroma cond."""
+    """Smoke test minimal DiT beat cond with chroma aux head and chroma cond."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float32
     dim = 64; depth = 4; heads = 8; num_tokens = 1025
@@ -397,7 +391,7 @@ def test_chroma_cond_aux_combined():
         n.startswith("chroma_aux_head.") for n, _ in model.named_parameters()
     )
     assert has_chroma_proj and has_chroma_aux
-    print("[PHASE-B-1] chroma cond projector + aux head both present")
+    print("[cond-aux-1] chroma cond projector + aux head both present")
 
     B, T = 2, max_duration_frames
     x = torch.randint(0, num_tokens, (B, num_rvq_layers, T), device=device)
@@ -418,7 +412,7 @@ def test_chroma_cond_aux_combined():
         )
     assert c_pred is not None and torch.isfinite(c_pred).all()
     assert torch.isfinite(logits[lm]).all()
-    print(f"[PHASE-B-2] forward OK, logits {tuple(logits.shape)}, chroma_aux_pred {tuple(c_pred.shape)}")
+    print(f"[cond-aux-2] forward OK, logits {tuple(logits.shape)}, chroma_aux_pred {tuple(c_pred.shape)}")
 
     # Generate end-to-end with both cond signals
     with torch.no_grad():
@@ -434,8 +428,8 @@ def test_chroma_cond_aux_combined():
             cache_kv=True, display_pbar=False, temperature=1.0,
             filter_logits_fn=["top_k_multi_out"], filter_kwargs=[{"k": 50}],
         )
-    print(f"[PHASE-B-3] generate OK, output {tuple(gen.shape)}")
-    print("PHASE B SMOKE PASSED")
+    print(f"[cond-aux-3] generate OK, output {tuple(gen.shape)}")
+    print("cond+aux smoke passed")
 
 
 if __name__ == "__main__":
