@@ -27,7 +27,7 @@ source scripts/slurm/activate_env.sh
 export PYTHONUNBUFFERED=1
 
 echo "============================================================"
-echo "DiT beat-phase conditioning — smoke test"
+echo "DiT beat-phase conditioning smoke test"
 echo "  node:    $(hostname)    job: ${SLURM_JOB_ID}"
 echo "  started: $(date)"
 echo "============================================================"

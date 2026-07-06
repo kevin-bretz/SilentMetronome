@@ -33,7 +33,7 @@ run_one () {
   local cfg="$2"
   local save_dir="/tmp/smoke_${label}_${SLURM_JOB_ID}"
   echo "=========================================================="
-  echo "SMOKE — ${label}: ${cfg}"
+  echo "SMOKE [${label}]: ${cfg}"
   echo "  save_dir: ${save_dir}"
   echo "  started:  $(date)"
   echo "=========================================================="

@@ -1,11 +1,11 @@
 #!/bin/bash
 ###############################################################################
-# stream-music-gen: Training → Evaluation Pipeline
+# stream-music-gen training + evaluation pipeline
 #
 # Usage:  ./submit.sh           (computes defaults, submits this script via sbatch)
 #         sbatch [flags] run_pipeline.sh   (if you prefer manual sbatch flags)
 #
-# Do NOT edit below the "nothing to edit" line — configure via pipeline.conf
+# Configure via pipeline.conf rather than editing this script.
 ###############################################################################
 #SBATCH --parsable
 
@@ -45,7 +45,7 @@ else
         echo "ERROR: ${CONF} not found and no SMG_* env vars set."
         exit 1
     fi
-    echo "(Using pipeline.conf — note: values are read at job start, not submit time)"
+    echo "(Using pipeline.conf. Values are read at job start, not submit time)"
     source "${CONF}"
 fi
 
@@ -82,7 +82,7 @@ SAVE_DIR="${PROJECT_DIR}/logs/${EXP_NAME}"
 # ENVIRONMENT
 ###############################################################################
 echo "============================================================"
-echo "Job ${SLURM_JOB_ID:-local} on $(hostname) — ${EXP_NAME}"
+echo "Job ${SLURM_JOB_ID:-local} on $(hostname): ${EXP_NAME}"
 echo "GPUs: ${NUM_GPUS}  Partition: ${PARTITION}"
 echo "Started: $(date)"
 echo "============================================================"
@@ -103,7 +103,7 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 echo ""
 
 ###############################################################################
-# STEP 1: RESOLVE MODEL TYPE → scripts / configs
+# STEP 1: RESOLVE MODEL TYPE TO SCRIPTS / CONFIGS
 ###############################################################################
 
 if [ "${MODEL_TYPE}" = "dec_online" ]; then
@@ -127,7 +127,7 @@ fi
 
 if [ "${SKIP_TRAINING}" = "true" ]; then
     echo "============================================================"
-    echo "SKIPPING TRAINING — using pre-selected checkpoint"
+    echo "SKIPPING TRAINING (using pre-selected checkpoint)"
     echo "============================================================"
 
     if [[ "${EVAL_CKPT_PATH}" != /* ]]; then

@@ -12,9 +12,9 @@
 
 set -euo pipefail
 
-# CPU array job: extract per-window TARGET-stem chroma from MIDI.
+# CPU array job: extract per-window target-stem chroma from MIDI.
 # Each array task processes 1/NUM_SHARDS of the windows. Idempotent (safe
-# to re-run after a partial completion — already-extracted windows skipped).
+# to re-run after a partial completion, already-extracted windows are skipped).
 #
 # Usage:
 #   sbatch scripts/slurm/extract_target_chroma.sbatch

@@ -13,9 +13,9 @@
 
 set -euo pipefail
 
-# PHASE C: FULL-cond DiT beat-phase + target-stem chroma AUX loss.
+# Phase C: full-cond DiT beat-phase + target-stem chroma aux loss.
 # Self-chains until TARGET_STEPS reached, then optionally launches Phase C
-# eval AND Phase D train (both via sbatch) when CHAIN_NEXT=1.
+# eval and Phase D train (both via sbatch) when CHAIN_NEXT=1.
 #
 # Required: FV in {-50,0,50}
 # Optional: INIT_CKPT, EXP_NAME, TARGET_STEPS, CHAIN_NEXT (default 1)
@@ -48,7 +48,7 @@ SLOT_TARGET=$(( LATEST_BEFORE + CHECKPOINT_INTERVAL ))
 if (( SLOT_TARGET > TARGET_STEPS )); then SLOT_TARGET=${TARGET_STEPS}; fi
 
 echo "============================================================"
-echo "PHASE C — full-cond DiT + chroma aux training: FV=${FV}, k=50"
+echo "PHASE C full-cond DiT + chroma aux training: FV=${FV}, k=50"
 echo "  config:      ${CONFIG}"
 echo "  init_ckpt:   ${INIT_CKPT:-<none: training from scratch>}"
 echo "  save_dir:    ${SAVE_DIR}"
@@ -152,9 +152,9 @@ else
       --export=ALL,MODEL_PATH="${CKPT_PATH}",SPLIT=test \
       scripts/slurm/eval_beat_phase.sbatch)
     echo "[chain] PHASE C eval job: ${EVAL_C}"
-    # Only launch Phase D if it isn't already running or already started.
-    # (Allows running Phase C and Phase D in parallel — if Phase D was
-    # submitted manually earlier, we don't want a redundant launch here.)
+    # Only launch Phase D if it isn't already running or already started,
+    # so a Phase D submitted manually earlier doesn't get a redundant
+    # launch here.
     PHASE_D_DIR="${PROJECT_DIR}/models/pref_dec_online_fv${FV}_k50_beat_phase_dit_chroma_aux_cond"
     PHASE_D_CKPTS=$(find "${PHASE_D_DIR}" -maxdepth 1 -name 'step=*.ckpt' 2>/dev/null | wc -l)
     PHASE_D_QUEUED=$(squeue -u "${USER}" -h -o "%j" --states=PENDING,RUNNING 2>/dev/null \
@@ -162,8 +162,8 @@ else
     if (( PHASE_D_CKPTS > 0 )) || (( PHASE_D_QUEUED > 0 )); then
       echo "[chain] PHASE D already exists/running (ckpts=${PHASE_D_CKPTS}, queued=${PHASE_D_QUEUED}); skipping launch"
     else
-      # IMPORTANT: do NOT --export=ALL here; that would leak Phase C's
-      # EXP_NAME into Phase D and clobber its save_dir.
+      # Do not use --export=ALL here. It would leak Phase C's EXP_NAME
+      # into Phase D and clobber its save_dir.
       PHASE_D=$(sbatch --parsable \
         --export=FV="${FV}",CHAIN_NEXT=1 \
         scripts/slurm/train_phase_d.sbatch)

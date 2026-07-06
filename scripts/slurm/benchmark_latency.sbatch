@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-# Streaming-inference latency benchmark for the SOTA checkpoint.
+# Streaming-inference latency benchmark for a trained checkpoint.
 #
 # Required env vars (pass via sbatch --export):
 #   MODEL_PATH : absolute path to the .ckpt

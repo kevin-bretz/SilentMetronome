@@ -13,11 +13,11 @@
 
 set -euo pipefail
 
-# Self-chaining training for the AUX + DiT-CONDITIONING COMBINED variant:
-# full DiT per-layer conditioning (matched to original DiT 200K) PLUS an
+# Self-chaining training for the combined aux + DiT-conditioning variant.
+# Full DiT per-layer conditioning (matched to original DiT 200K) plus an
 # auxiliary beat-phase prediction head pressuring the encoder to encode
 # beat info even when it gets the conditioning for free. Tests whether
-# aux loss is additive or redundant on top of explicit conditioning.
+# the aux loss is additive or redundant on top of explicit conditioning.
 #
 # Required:
 #   FV : future_visibility, one of "-50" | "0" | "50"
@@ -141,5 +141,5 @@ if (( LATEST_STEP < TARGET_STEPS )); then
     scripts/slurm/train_dit_aux_combined_beat_phase.sbatch)
   echo "[chain] queued next slot: job ${NEXT_JOB}"
 else
-  echo "[chain] training complete — no further slots needed"
+  echo "[chain] training complete, no further slots needed"
 fi

@@ -12,8 +12,8 @@
 
 set -euo pipefail
 
-# CPU array job: extract per-window INPUT-mix chroma from audio (librosa
-# chroma_cqt). HPSS off by default — full HPSS is too slow at this scale.
+# CPU array job: extract per-window input-mix chroma from audio (librosa
+# chroma_cqt). HPSS is off by default, full HPSS is too slow at this scale.
 # Idempotent (safe to re-run; already-extracted windows skipped).
 #
 # Usage:

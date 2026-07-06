@@ -13,8 +13,8 @@
 set -euo pipefail
 
 # Equivalence test: naive per-step DiT conditioning vs chunk-ahead
-# modulation precompute. Exits nonzero on FAIL (so downstream jobs can
-# depend on it with afterok).
+# modulation precompute. Exits nonzero on failure so downstream jobs can
+# depend on it with afterok.
 #
 # Required env vars (pass via sbatch --export):
 #   MODEL_PATH : absolute path to the .ckpt (must be a DiT-conditioned model)

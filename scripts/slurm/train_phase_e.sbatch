@@ -13,10 +13,10 @@
 
 set -euo pipefail
 
-# PHASE E: PHASE C (full-cond DiT + chroma aux) WITH strengthened aux loss.
-# Strengtheners: linear head + MSE+cos loss + multi-horizon {0,4,8,16} +
-# deep supervision at layers {8, 12}. Same data / optimizer / arch as Phase C
-# so the only A/B variable is the aux head/loss design.
+# Phase E: Phase C (full-cond DiT + chroma aux) with strengthened aux loss.
+# Strengtheners are a linear head, MSE+cos loss, multi-horizon {0,4,8,16},
+# and deep supervision at layers {8, 12}. Same data / optimizer / arch as
+# Phase C so the only A/B variable is the aux head/loss design.
 # Self-chains until TARGET_STEPS reached, then queues Phase E eval.
 #
 # Required: FV in {-50,0,50}
@@ -50,7 +50,7 @@ SLOT_TARGET=$(( LATEST_BEFORE + CHECKPOINT_INTERVAL ))
 if (( SLOT_TARGET > TARGET_STEPS )); then SLOT_TARGET=${TARGET_STEPS}; fi
 
 echo "============================================================"
-echo "PHASE E — full-cond DiT + STRONG chroma aux training: FV=${FV}, k=50"
+echo "PHASE E full-cond DiT + strong chroma aux training: FV=${FV}, k=50"
 echo "  config:      ${CONFIG}"
 echo "  init_ckpt:   ${INIT_CKPT:-<none: training from scratch>}"
 echo "  save_dir:    ${SAVE_DIR}"

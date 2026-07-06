@@ -13,10 +13,10 @@
 
 set -euo pipefail
 
-# Self-chaining training for the AUX-LOSS-ONLY variant: no DiT
+# Self-chaining training for the aux-loss-only variant. No DiT
 # conditioning, only an auxiliary beat-phase prediction head pushing
 # the encoder to surface beat-phase information internally. 200K cosine
-# schedule for matched comparison vs original-DiT-200K and minimal-DiT-200K.
+# schedule to match the DiT runs.
 #
 # Required:
 #   FV : future_visibility, one of "-50" | "0" | "50"
@@ -44,7 +44,7 @@ SAVE_DIR="${PROJECT_DIR}/models/${EXP_NAME}"
 TARGET_STEPS="${TARGET_STEPS:-200000}"
 
 echo "============================================================"
-echo "AUX-only beat-phase training: FV=${FV}, k=50"
+echo "Aux-only beat-phase training: FV=${FV}, k=50"
 echo "  config:      ${CONFIG}"
 echo "  init_ckpt:   ${INIT_CKPT:-<none: training from scratch>}"
 echo "  save_dir:    ${SAVE_DIR}"
@@ -140,5 +140,5 @@ if (( LATEST_STEP < TARGET_STEPS )); then
     scripts/slurm/train_aux_only_beat_phase.sbatch)
   echo "[chain] queued next slot: job ${NEXT_JOB}"
 else
-  echo "[chain] training complete — no further slots needed"
+  echo "[chain] training complete, no further slots needed"
 fi

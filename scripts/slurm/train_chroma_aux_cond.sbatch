@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-# PHASE B: minimal-DiT beat-phase cond + target chroma AUX loss + input
+# Phase B: minimal-DiT beat-phase cond + target chroma aux loss + input
 # chroma DiT conditioning. Self-chains until TARGET_STEPS reached. When
 # done with CHAIN_NEXT=1, queues the Phase B eval.
 #
@@ -48,7 +48,7 @@ SLOT_TARGET=$(( LATEST_BEFORE + CHECKPOINT_INTERVAL ))
 if (( SLOT_TARGET > TARGET_STEPS )); then SLOT_TARGET=${TARGET_STEPS}; fi
 
 echo "============================================================"
-echo "PHASE B — chroma aux + cond training: FV=${FV}, k=50"
+echo "PHASE B chroma aux + cond training: FV=${FV}, k=50"
 echo "  config:      ${CONFIG}"
 echo "  init_ckpt:   ${INIT_CKPT:-<none: training from scratch>}"
 echo "  save_dir:    ${SAVE_DIR}"

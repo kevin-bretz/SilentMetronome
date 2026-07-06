@@ -13,8 +13,8 @@
 
 set -euo pipefail
 
-# PHASE K @ fv=0: same Phase K target-token future-aux head (K=3,
-# [10,25,40]) but with the encoder having NO future-mix visibility.
+# Phase K at fv=0: same Phase K target-token future-aux head (K=3,
+# [10,25,40]) but with the encoder having no future-mix visibility.
 # Tests whether Phase K's mechanism (pressure on next-token circuit to
 # encode future structure) holds under the strictly-causal deployability
 # setting.
@@ -45,7 +45,7 @@ SLOT_TARGET=$(( LATEST_BEFORE + CHECKPOINT_INTERVAL ))
 if (( SLOT_TARGET > TARGET_STEPS )); then SLOT_TARGET=${TARGET_STEPS}; fi
 
 echo "============================================================"
-echo "PHASE K @ fv=0 — Phase K (K=3) without future-mix visibility"
+echo "PHASE K @ fv=0: Phase K (K=3) without future-mix visibility"
 echo "  config:      ${CONFIG}"
 echo "  init_ckpt:   ${INIT_CKPT:-<none: training from scratch>}"
 echo "  save_dir:    ${SAVE_DIR}"
@@ -137,7 +137,7 @@ echo "[chain] latest step on disk: ${LATEST_STEP}  (target=${TARGET_STEPS})"
 # Auto-prune intermediate ckpts to cap storage growth during long chained
 # trainings. Keeps only step=${LATEST_STEP}.ckpt (next-slot resume target).
 # Skipped when LATEST_STEP==0 (nothing trained) or when LATEST_STEP <=
-# LATEST_BEFORE (no progress: leave files alone for manual debug).
+# LATEST_BEFORE (no progress, leave files alone for manual debug).
 if (( LATEST_STEP > LATEST_BEFORE )); then
   pruned=0
   for f in "${SAVE_DIR}"/step=*.ckpt; do
@@ -150,7 +150,7 @@ if (( LATEST_STEP > LATEST_BEFORE )); then
 fi
 
 if (( LATEST_STEP <= LATEST_BEFORE )); then
-  echo "[chain] no progress this slot (latest=${LATEST_STEP} <= before=${LATEST_BEFORE}); NOT chaining"
+  echo "[chain] no progress this slot (latest=${LATEST_STEP} <= before=${LATEST_BEFORE}); not chaining"
 elif (( LATEST_STEP < TARGET_STEPS )); then
   echo "[chain] not done yet; self-submitting next slot"
   NEXT_JOB=$(sbatch --parsable \

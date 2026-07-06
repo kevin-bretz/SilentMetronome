@@ -13,19 +13,15 @@
 
 set -euo pipefail
 
-# PHASE K: Phase F (fv=+50 + DiT beat cond + mp aux + CQT aux) + future
-# TARGET-STEM TOKEN aux head. Predict patterned DAC tokens at mangled
+# Phase K: Phase F (fv=+50 + DiT beat cond + mp aux + CQT aux) + future
+# target-stem token aux head. Predict patterned DAC tokens at mangled
 # position p+δ for δ ∈ {10, 25, 40} (= 0.2s / 0.5s / 0.8s ahead at 50 Hz),
 # all inside the fv=+50 lookahead.
 #
-# Why this and not Phase J again: Phase J's mp/cqt feature heads trained
-# fine (val loss rose monotonically with δ) but Beat-F was unchanged
-# (0.361 vs F-fv+50 0.360). The aux task was solvable by routing future-
-# mix attention outputs to the head, without ever touching the generation
-# pathway. Phase K puts the supervision on the SAME VOCABULARY the main
-# next-token head uses, with targets that are NOT in the input at time t
-# (autoregressively in the future). The only useful way to predict them
-# is to attend to the future-mix tokens.
+# The future targets share the next-token head's vocabulary and are not
+# present in the input at time t, so the only way to predict them is to
+# attend to the future-mix tokens. A feature-space aux head can be solved
+# without touching the generation pathway; this one cannot.
 #
 # Self-chains until TARGET_STEPS reached, then queues eval (cond-on default).
 #
@@ -51,16 +47,16 @@ LATEST_BEFORE=$(find "${SAVE_DIR}" -maxdepth 1 -name 'step=*.ckpt' -printf '%f\n
   | sed -E 's/^step=([0-9]+)\.ckpt$/\1/' | sort -n | tail -1 || true)
 LATEST_BEFORE="${LATEST_BEFORE:-0}"
 
-# gpu-short (4h wall-time, ~63 min setup overhead per slot) — each slot
-# trains exactly CHECKPOINT_INTERVAL steps then exits and self-chains.
-# 10K @ ~1.54 it/s ≈ 108 min training, fits inside 4h with ~70 min buffer.
+# Each gpu-short slot trains exactly CHECKPOINT_INTERVAL steps then exits
+# and self-chains. 10K steps plus setup overhead fits inside the 4h
+# wall-time with a comfortable buffer.
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-10000}"
 
 SLOT_TARGET=$(( LATEST_BEFORE + CHECKPOINT_INTERVAL ))
 if (( SLOT_TARGET > TARGET_STEPS )); then SLOT_TARGET=${TARGET_STEPS}; fi
 
 echo "============================================================"
-echo "PHASE K — Phase F + target-stem token future aux (CE at p+δ), fv=+50, k=50"
+echo "PHASE K Phase F + target-stem token future aux (CE at p+δ), fv=+50, k=50"
 echo "  config:      ${CONFIG}"
 echo "  init_ckpt:   ${INIT_CKPT:-<none: training from scratch>}"
 echo "  save_dir:    ${SAVE_DIR}"
@@ -150,7 +146,7 @@ LATEST_STEP="${LATEST_STEP:-0}"
 echo "[chain] latest step on disk: ${LATEST_STEP}  (target=${TARGET_STEPS})"
 
 if (( LATEST_STEP <= LATEST_BEFORE )); then
-  echo "[chain] no progress this slot (latest=${LATEST_STEP} <= before=${LATEST_BEFORE}); NOT chaining"
+  echo "[chain] no progress this slot (latest=${LATEST_STEP} <= before=${LATEST_BEFORE}); not chaining"
 elif (( LATEST_STEP < TARGET_STEPS )); then
   echo "[chain] not done yet; self-submitting next slot"
   NEXT_JOB=$(sbatch --parsable \

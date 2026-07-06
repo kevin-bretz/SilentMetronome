@@ -1,5 +1,5 @@
 #!/bin/bash
-# Orchestrator: launches the Phase A (chroma aux) → Phase B (chroma aux +
+# Orchestrator for the Phase A (chroma aux) then Phase B (chroma aux +
 # cond) sequence on gpu-a100-80g. Each train sbatch is self-chaining, so
 # Phase A submits Phase B + Phase A eval automatically when it reaches
 # TARGET_STEPS. Phase B submits Phase B eval when done.
@@ -33,9 +33,9 @@ if [ ! -d "${SAMPLE_WIN}" ]; then
   echo "ERROR: sample window ${SAMPLE_WIN} missing"; exit 1
 fi
 [ -f "${SAMPLE_WIN}/target_chroma.pt" ] || \
-  echo "WARNING: target_chroma.pt not found in sample window — chroma extraction may not be complete yet"
+  echo "WARNING: target_chroma.pt not found in sample window, chroma extraction may not be complete yet"
 [ -f "${SAMPLE_WIN}/input_chroma.pt" ] || \
-  echo "WARNING: input_chroma.pt not found in sample window — chroma extraction may not be complete yet"
+  echo "WARNING: input_chroma.pt not found in sample window, chroma extraction may not be complete yet"
 
 echo "============================================================"
 echo "Launching chroma training sequence: FV=${FV} chain_next=${CHAIN_NEXT}"

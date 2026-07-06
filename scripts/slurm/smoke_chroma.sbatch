@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-# Smoke-test BOTH Phase A (aux only) and Phase B (aux + DiT cond) chroma
+# Smoke-test both Phase A (aux only) and Phase B (aux + DiT cond) chroma
 # configs end-to-end on a single gpu-short slot. ~20 train steps + a val
 # pass + a checkpoint write each. If both pass, the long gpu-a100-80g
 # slots are safe to wait out.
@@ -48,4 +48,4 @@ run_smoke() {
 run_smoke "phaseA_aux"      configs/online/online_prefix_decoder/online_prefix_decoder_fv0_k50_chroma_smoke.yml
 run_smoke "phaseB_aux_cond" configs/online/online_prefix_decoder/online_prefix_decoder_fv0_k50_chroma_cond_smoke.yml
 
-echo "[smoke] BOTH PHASES PASSED"
+echo "[smoke] both phases passed"

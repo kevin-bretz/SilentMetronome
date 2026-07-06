@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-# PHASE A: minimal-DiT beat-phase cond + target-stem chroma AUX loss.
+# Phase A: minimal-DiT beat-phase cond + target-stem chroma aux loss.
 # Self-chains until TARGET_STEPS reached, then optionally launches Phase B
 # train + Phase A eval (both in afterok-chained jobs) when CHAIN_NEXT=1.
 #
@@ -48,7 +48,7 @@ SLOT_TARGET=$(( LATEST_BEFORE + CHECKPOINT_INTERVAL ))
 if (( SLOT_TARGET > TARGET_STEPS )); then SLOT_TARGET=${TARGET_STEPS}; fi
 
 echo "============================================================"
-echo "PHASE A — chroma aux training: FV=${FV}, k=50"
+echo "PHASE A chroma aux training: FV=${FV}, k=50"
 echo "  config:      ${CONFIG}"
 echo "  init_ckpt:   ${INIT_CKPT:-<none: training from scratch>}"
 echo "  save_dir:    ${SAVE_DIR}"
@@ -152,9 +152,9 @@ else
       --export=ALL,MODEL_PATH="${CKPT_PATH}",SPLIT=test \
       scripts/slurm/eval_beat_phase.sbatch)
     echo "[chain] PHASE A eval job: ${EVAL_A}"
-    # IMPORTANT: do NOT --export=ALL here. ALL would leak this script's
-    # EXP_NAME (chroma_aux) into Phase B, causing it to write into Phase A's
-    # save_dir and clobber its args.yml/checkpoints. Pass only what's needed.
+    # Do not use --export=ALL here. It would leak this script's EXP_NAME
+    # into Phase B, making Phase B write into Phase A's save_dir and
+    # clobber its args.yml/checkpoints. Pass only what's needed.
     PHASE_B=$(sbatch --parsable \
       --export=FV="${FV}",CHAIN_NEXT=1 \
       scripts/slurm/train_chroma_aux_cond.sbatch)

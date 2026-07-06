@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-# PHASE H: Phase F + input-mix CQT aux head.
+# Phase H: Phase F + input-mix CQT aux head.
 # Same DiT beat-phase cond + multipitch + target CQT aux heads as Phase F,
 # plus a new aux head supervised against the precomputed input-mix CQT
 # (84-bin log-magnitude). Forces the hidden state to retain a faithful
@@ -46,7 +46,7 @@ SLOT_TARGET=$(( LATEST_BEFORE + CHECKPOINT_INTERVAL ))
 if (( SLOT_TARGET > TARGET_STEPS )); then SLOT_TARGET=${TARGET_STEPS}; fi
 
 echo "============================================================"
-echo "PHASE H — Phase F + input-mix CQT aux head"
+echo "PHASE H Phase F + input-mix CQT aux head"
 echo "  config:      ${CONFIG}"
 echo "  init_ckpt:   ${INIT_CKPT:-<none: training from scratch>}"
 echo "  save_dir:    ${SAVE_DIR}"
@@ -136,7 +136,7 @@ LATEST_STEP="${LATEST_STEP:-0}"
 echo "[chain] latest step on disk: ${LATEST_STEP}  (target=${TARGET_STEPS})"
 
 if (( LATEST_STEP <= LATEST_BEFORE )); then
-  echo "[chain] no progress this slot (latest=${LATEST_STEP} <= before=${LATEST_BEFORE}); NOT chaining"
+  echo "[chain] no progress this slot (latest=${LATEST_STEP} <= before=${LATEST_BEFORE}); not chaining"
 elif (( LATEST_STEP < TARGET_STEPS )); then
   echo "[chain] not done yet; self-submitting next slot"
   NEXT_JOB=$(sbatch --parsable \

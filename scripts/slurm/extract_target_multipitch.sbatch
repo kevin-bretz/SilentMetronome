@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-# CPU array job: extract per-window TARGET-stem multipitch + velocity from MIDI.
+# CPU array job: extract per-window target-stem multipitch + velocity from MIDI.
 # Each array task processes 1/NUM_SHARDS of the windows. Idempotent.
 # Mirrors extract_target_chroma.sbatch.
 #

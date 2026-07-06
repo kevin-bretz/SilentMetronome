@@ -39,7 +39,7 @@ cd "${PROJECT_DIR}"
 
 mkdir -p slurm_logs
 
-# Activate the conda env (matches what preprocessing used; has torch, audiotools, x_transformers 2.16.0)
+# Activate the conda env used by preprocessing (torch, audiotools, x_transformers 2.16.0)
 # shellcheck disable=SC1091
 source scripts/slurm/activate_env.sh
 
@@ -71,7 +71,7 @@ fi
 
 # Per-job inductor cache to avoid cross-job/cross-slot triton lock contention,
 # which has been observed to deadlock the slot at compile-resume time.
-# This forces a fresh ~5-10 min recompile per slot — cheap insurance.
+# This forces a fresh ~5-10 min recompile per slot, cheap insurance.
 export TORCHINDUCTOR_CACHE_DIR="${TMPDIR:-/tmp}/${USER}_inductor_${SLURM_JOB_ID}"
 mkdir -p "${TORCHINDUCTOR_CACHE_DIR}"
 echo "[chain] TORCHINDUCTOR_CACHE_DIR=${TORCHINDUCTOR_CACHE_DIR}"
@@ -79,8 +79,8 @@ echo "[chain] TORCHINDUCTOR_CACHE_DIR=${TORCHINDUCTOR_CACHE_DIR}"
 # Force unbuffered stdout/stderr so Lightning's progress bar and per-step
 # logging show up in slurm_logs/*.out in real time. Without this, slurm's
 # redirect of stdout to a file makes python block-buffer it, and Lightning's
-# CR-based progress bar never flushes — it looks like the job is hung even
-# while training is healthy.
+# CR-based progress bar never flushes, so the job looks hung even while
+# training is healthy.
 export PYTHONUNBUFFERED=1
 
 # Run training in background so the shell can receive SIGTERM (from --signal=B)
@@ -111,19 +111,20 @@ PY_PID=$!
 # If the file size doesn't grow by >1 KiB for WD_STALE seconds (after an
 # initial WD_GRACE for compile + first step), send SIGTERM. Lightning's
 # handler saves a ckpt if it can, python exits, the chain self-submits a
-# fresh slot — losing ~30 min instead of ~4 h to a wedged slot.
+# fresh slot, losing ~30 min instead of ~4 h to a wedged slot.
 #
-# Why not stdout mtime: slurm_logs/*.out only updates at event boundaries
-# (sample, val, checkpoint), and gaps of >1 h are normal at this checkpoint
-# cadence. Stdout mtime would false-fire on healthy slots.
-WD_GRACE=1800    # 30 min: compile-resume + first sample callback
-WD_STALE=1800    # 30 min of no .wandb size growth ⇒ assume hang
+# Stdout mtime is not usable as the signal because slurm_logs/*.out only
+# updates at event boundaries (sample, val, checkpoint) and gaps of >1 h
+# are normal at this checkpoint cadence, so it would false-fire on
+# healthy slots.
+WD_GRACE=1800    # 30 min for compile-resume + first sample callback
+WD_STALE=1800    # 30 min of no .wandb size growth means assume hang
 watchdog() {
   sleep "${WD_GRACE}"
   local prev_size=0
   local stale_for=0
   while kill -0 "${PY_PID}" 2>/dev/null; do
-    # Resolve the active wandb run file fresh each tick — wandb writes one
+    # Resolve the active wandb run file fresh each tick. wandb writes one
     # run-<id>.wandb per process and exposes it under wandb/latest-run/.
     local wandb_file
     wandb_file=$(ls -t "${SAVE_DIR}/wandb/latest-run/"*.wandb 2>/dev/null | head -1)
@@ -175,5 +176,5 @@ if (( LATEST_STEP < TARGET_STEPS )); then
     scripts/slurm/train_ft_beat_phase.sbatch)
   echo "[chain] queued next slot: job ${NEXT_JOB}"
 else
-  echo "[chain] training complete — no further slots needed"
+  echo "[chain] training complete, no further slots needed"
 fi

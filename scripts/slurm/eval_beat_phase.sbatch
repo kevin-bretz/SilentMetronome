@@ -42,7 +42,7 @@ mkdir -p slurm_logs
 # shellcheck disable=SC1091
 source scripts/slurm/activate_env.sh
 
-# Force unbuffered stdout — same reasoning as in the training sbatch.
+# Force unbuffered stdout, same reasoning as in the training sbatch.
 export PYTHONUNBUFFERED=1
 
 [ -f "${MODEL_PATH}" ] || { echo "ERROR: ckpt not found: ${MODEL_PATH}"; exit 1; }

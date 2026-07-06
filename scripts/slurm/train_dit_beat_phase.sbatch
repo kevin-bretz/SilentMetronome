@@ -97,7 +97,7 @@ PY_PID=$!
 
 # Mid-slot pruner: every 60s after a 10-min grace, keep only the
 # highest-step step=*.ckpt. Race-safe with Lightning's atomic ckpt write
-# (tmp + rename — *.tmp files don't match step=*.ckpt). Caps mid-slot
+# (tmp + rename, so *.tmp files don't match step=*.ckpt). Caps mid-slot
 # disk usage at one ckpt (~6GB) instead of letting the per-20k-step
 # saves accumulate to 5-7 ckpts before the post-slot prune runs.
 midslot_pruner() {
@@ -120,7 +120,7 @@ midslot_pruner() {
 midslot_pruner &
 MP_PID=$!
 
-# Watchdog: same as train_ft_beat_phase.sbatch — wandb .wandb file size
+# Watchdog: same as train_ft_beat_phase.sbatch, wandb .wandb file size
 # growth as health signal. SIGTERMs python after 30 min of no growth.
 WD_GRACE=1800
 WD_STALE=1800
@@ -164,12 +164,12 @@ echo "[chain] python exited with code ${PY_EXIT}"
 
 rm -rf "${TORCHINDUCTOR_CACHE_DIR}" 2>/dev/null || true
 
-# Prune step=*.ckpt to keep only the highest-step file. base config has
-# checkpoint_top_k=-1 so each slot adds ~5-7 ckpts (~6GB each). The full
-# Lightning ckpt carries state_dict + optimizer + LR scheduler + AMP scaler
-# + global_step, so the highest-step ckpt is sufficient to resume; auto-
-# resume (load_from_latest_checkpoint=true, base_trainer.py) picks it by
-# mtime, and wandb continuity comes from the wandb/ run dir, not the ckpt.
+# Prune step=*.ckpt to keep only the highest-step file. The base config
+# has checkpoint_top_k=-1, so each slot adds ~5-7 ckpts (~6GB each). The
+# full Lightning ckpt carries state_dict + optimizer + LR scheduler + AMP
+# scaler + global_step, so the highest-step ckpt is sufficient to resume.
+# Auto-resume (load_from_latest_checkpoint=true, base_trainer.py) picks it
+# by mtime, and wandb continuity comes from the wandb/ run dir, not the ckpt.
 if compgen -G "${SAVE_DIR}/step=*.ckpt" > /dev/null; then
   KEEP_CKPT="$(find "${SAVE_DIR}" -maxdepth 1 -name 'step=*.ckpt' -printf '%f\n' \
     | sed -E 's/^step=([0-9]+)\.ckpt$/\1\t&/' \
@@ -194,5 +194,5 @@ if (( LATEST_STEP < TARGET_STEPS )); then
     scripts/slurm/train_dit_beat_phase.sbatch)
   echo "[chain] queued next slot: job ${NEXT_JOB}"
 else
-  echo "[chain] training complete — no further slots needed"
+  echo "[chain] training complete, no further slots needed"
 fi

@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-# CPU array job: extract per-window INPUT-mix CQT from audio (librosa cqt
+# CPU array job: extract per-window input-mix CQT from audio (librosa cqt
 # on 84 bins from C1). Same shape as ``target_cqt.pt`` ([T, 84] float16),
 # computed from the sum of all input-stem FLAC slices.
 #

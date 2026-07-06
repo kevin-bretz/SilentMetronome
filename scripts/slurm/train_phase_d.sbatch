@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-# PHASE D: FULL-cond DiT beat-phase + chroma aux + chroma DiT cond.
+# Phase D: full-cond DiT beat-phase + chroma aux + chroma DiT cond.
 # Self-chains until TARGET_STEPS reached, then queues Phase D eval.
 #
 # Required: FV in {-50,0,50}
@@ -47,7 +47,7 @@ SLOT_TARGET=$(( LATEST_BEFORE + CHECKPOINT_INTERVAL ))
 if (( SLOT_TARGET > TARGET_STEPS )); then SLOT_TARGET=${TARGET_STEPS}; fi
 
 echo "============================================================"
-echo "PHASE D — full-cond DiT + chroma aux + chroma cond training: FV=${FV}, k=50"
+echo "PHASE D full-cond DiT + chroma aux + chroma cond training: FV=${FV}, k=50"
 echo "  config:      ${CONFIG}"
 echo "  init_ckpt:   ${INIT_CKPT:-<none: training from scratch>}"
 echo "  save_dir:    ${SAVE_DIR}"

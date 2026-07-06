@@ -13,11 +13,10 @@
 
 set -euo pipefail
 
-# Self-chaining training for the MINIMAL DiT beat-phase variant on the
-# matched 200K schedule (cosine decay over 200K). This run isolates the
-# effect of dropping the "redundant" conditioning signals from the
-# training-length confound between the previous minimal-300K run and
-# the original-DiT-200K run.
+# Self-chaining training for the minimal DiT beat-phase variant on the
+# matched 200K schedule (cosine decay over 200K), so the effect of
+# dropping the redundant conditioning signals is not confounded by
+# training length.
 #
 # Required:
 #   FV : future_visibility, one of "-50" | "0" | "50"
@@ -154,5 +153,5 @@ if (( LATEST_STEP < TARGET_STEPS )); then
     scripts/slurm/train_dit_minimal_200k_beat_phase.sbatch)
   echo "[chain] queued next slot: job ${NEXT_JOB}"
 else
-  echo "[chain] training complete — no further slots needed"
+  echo "[chain] training complete, no further slots needed"
 fi

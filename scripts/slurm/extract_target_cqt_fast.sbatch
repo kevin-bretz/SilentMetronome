@@ -11,14 +11,12 @@
 
 set -euo pipefail
 
-# Fan-out resubmission: same target_cqt extraction as the original sbatch
-# but allowed to land on cpu-short (~700 idle CPUs RIGHT NOW) or cpu-zen4
-# (~80 idle), whichever Slurm picks. Each shard takes ~50-60 min on a
-# completed run (proved by shards 0-3) so 4h limit is comfortable.
+# Fan-out resubmission: same target_cqt extraction as the original sbatch,
+# but allowed to land on cpu-short or cpu-zen4, whichever Slurm picks.
+# Each shard takes roughly an hour, so the 4h limit is comfortable.
 #
-# IMPORTANT: this sbatch hardcodes NUM_SHARDS=64 so the stride pattern
-# matches the original 64-shard partition (shards 0-3 already complete).
-# Submit ONLY the missing range, e.g.:
+# NUM_SHARDS is hardcoded to 64 so the stride pattern matches the original
+# 64-shard partition. Submit only the missing range, e.g.:
 #   sbatch --array=4-63 scripts/slurm/extract_target_cqt_fast.sbatch
 # Each task uses SLURM_ARRAY_TASK_ID as its shard_idx, so shards align
 # with the original numbering.
@@ -30,7 +28,7 @@ mkdir -p slurm_logs
 # shellcheck disable=SC1091
 source scripts/slurm/activate_env.sh
 
-NUM_SHARDS=64                                  # hardcoded — preserves stride alignment
+NUM_SHARDS=64                                  # hardcoded to preserve stride alignment
 SHARD_IDX="${SLURM_ARRAY_TASK_ID:-0}"
 OVERWRITE_FLAG=""
 if [ "${OVERWRITE:-0}" = "1" ]; then OVERWRITE_FLAG="--overwrite"; fi

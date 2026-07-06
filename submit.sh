@@ -1,6 +1,6 @@
 #!/bin/bash
 ###############################################################################
-# submit.sh — Reads pipeline.conf, computes defaults, submits run_pipeline.sh
+# Reads pipeline.conf, computes defaults, and submits run_pipeline.sh.
 #
 # Usage:  ./submit.sh
 ###############################################################################

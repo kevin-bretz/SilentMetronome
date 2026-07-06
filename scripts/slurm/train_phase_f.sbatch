@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-# PHASE F: full-cond DiT beat-phase + multipitch aux + CQT aux.
+# Phase F: full-cond DiT beat-phase + multipitch aux + CQT aux.
 # Self-chains until TARGET_STEPS reached, then queues Phase F eval.
 #
 # Required: FV in {-50,0,50}
@@ -47,7 +47,7 @@ SLOT_TARGET=$(( LATEST_BEFORE + CHECKPOINT_INTERVAL ))
 if (( SLOT_TARGET > TARGET_STEPS )); then SLOT_TARGET=${TARGET_STEPS}; fi
 
 echo "============================================================"
-echo "PHASE F — DiT beat-phase cond + multipitch aux + CQT aux: FV=${FV}, k=50"
+echo "PHASE F DiT beat-phase cond + multipitch aux + CQT aux: FV=${FV}, k=50"
 echo "  config:      ${CONFIG}"
 echo "  init_ckpt:   ${INIT_CKPT:-<none: training from scratch>}"
 echo "  save_dir:    ${SAVE_DIR}"
@@ -137,7 +137,7 @@ LATEST_STEP="${LATEST_STEP:-0}"
 echo "[chain] latest step on disk: ${LATEST_STEP}  (target=${TARGET_STEPS})"
 
 if (( LATEST_STEP <= LATEST_BEFORE )); then
-  echo "[chain] no progress this slot (latest=${LATEST_STEP} <= before=${LATEST_BEFORE}); NOT chaining"
+  echo "[chain] no progress this slot (latest=${LATEST_STEP} <= before=${LATEST_BEFORE}); not chaining"
 elif (( LATEST_STEP < TARGET_STEPS )); then
   echo "[chain] not done yet; self-submitting next slot"
   NEXT_JOB=$(sbatch --parsable \

@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-# Self-chaining training for the MINIMAL DiT beat-phase variant.
+# Self-chaining training for the minimal DiT beat-phase variant.
 # Same chain mechanics as train_dit_beat_phase.sbatch; only the config
 # (and default exp name + target steps) differ.
 #
@@ -139,5 +139,5 @@ if (( LATEST_STEP < TARGET_STEPS )); then
     scripts/slurm/train_dit_minimal_beat_phase.sbatch)
   echo "[chain] queued next slot: job ${NEXT_JOB}"
 else
-  echo "[chain] training complete — no further slots needed"
+  echo "[chain] training complete, no further slots needed"
 fi

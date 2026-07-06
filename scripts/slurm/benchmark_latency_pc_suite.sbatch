@@ -12,11 +12,10 @@
 
 set -euo pipefail
 
-# Same-node RTF benchmark suite for the paper's inference-overhead numbers:
-#   1. unconditioned baseline          (fv0_k50, 218M)
-#   2. conditioned, naive per-step path (fv50 Phase K, 510M)
-#   3. conditioned, chunk-ahead modulation precompute
-# Running all three inside one allocation removes node-to-node variance.
+# Same-node RTF benchmark suite for the inference-overhead numbers. Runs
+# the unconditioned baseline, the conditioned naive per-step path, and the
+# conditioned chunk-ahead modulation precompute inside one allocation,
+# which removes node-to-node variance.
 #
 # Optional env vars: BASELINE_CKPT, COND_CKPT, N_* (see benchmark_latency.py),
 # DATA_BASE_DIR, OUT_DIR.
@@ -51,7 +50,7 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 echo
 
 # The baseline ckpt's args.yml records the pre-beat-grid dataset dir, which
-# no longer exists; the _beat superset works for all models (Jun 10 runs).
+# no longer exists. The _beat superset dir works for all models.
 DATA_BASE_DIR="${DATA_BASE_DIR:-stream_music_gen_data/precompute_audio_mixdown_20s_beat}"
 EXTRA_ARGS="--data_base_dir ${DATA_BASE_DIR}"
 echo "[suite] data_base_dir: ${DATA_BASE_DIR}"
