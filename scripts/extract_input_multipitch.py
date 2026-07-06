@@ -23,7 +23,7 @@ cond fallback.
 For inference-time-recoverable cond input, ``input_chroma`` and
 ``input_cqt`` (extracted from audio) are the parallel options.
 
-Idempotent. SLURM array via shard_idx/num_shards.
+Idempotent.
 """
 
 from __future__ import annotations
@@ -115,8 +115,6 @@ def main():
     parser.add_argument(
         "--splits", nargs="+", default=["train", "valid", "test"]
     )
-    parser.add_argument("--shard_idx", type=int, default=0)
-    parser.add_argument("--num_shards", type=int, default=1)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--max_examples", type=int, default=-1)
     args = parser.parse_args()
@@ -136,11 +134,10 @@ def main():
             print(f"[skip] split missing: {split_dir}")
             continue
         windows = sorted(p for p in split_dir.iterdir() if p.is_dir())
-        windows = windows[args.shard_idx :: args.num_shards]
         if args.max_examples > 0:
             windows = windows[: args.max_examples]
         print(
-            f"[{split}] shard={args.shard_idx}/{args.num_shards} "
+            f"[{split}] "
             f"-> {len(windows)} windows"
         )
         for w in tqdm(windows, desc=f"{split}", mininterval=10.0):

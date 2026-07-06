@@ -16,8 +16,7 @@ Verifies, on a real validation batch (batch_size=1, GPU required):
      (Doubles as a run-to-run determinism check for the baseline: if D
      fails, read B as a match rate, not as a bug.)
 
-Exit code 0 iff A, B, D pass. Run via
-scripts/slurm/test_precompute_equivalence.sbatch (compute node only).
+Exit code 0 iff A, B, D pass. Requires a GPU.
 """
 
 import argparse

@@ -5,12 +5,13 @@ by monkey-patching `generate_chunk` to record each chunk's latency inside a
 warm KV-cache session. Separates cold-cache chunk-1 from warm-cache chunks
 2..N. Also times the DAC decode step.
 
-Hard requirement: must run on an A100 (verified at startup; aborts otherwise).
+Hard requirement: must run on an A100 (verified at startup; aborts otherwise),
+so that numbers are comparable to the ones we report.
 
-Run via sbatch (compute node only). Example:
+Example:
 
-    sbatch --export=MODEL_PATH=/abs/path/to/step=N.ckpt \
-           scripts/slurm/benchmark_latency.sbatch
+    python scripts/gen_pred/benchmark_latency.py \
+        --model_path models/<EXP_NAME>/step=200000.ckpt
 """
 
 import argparse

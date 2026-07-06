@@ -12,7 +12,7 @@ train), but we never needed it: source FLACs have the data and slice-reads
 are cheap (~30ms per stem slice via soundfile).
 
 HPSS is opt-in. Idempotent: skips windows that already have ``input_chroma.pt``
-unless ``--overwrite`` is passed. SLURM array via shard_idx/num_shards.
+unless ``--overwrite`` is passed.
 """
 
 from __future__ import annotations
@@ -161,8 +161,6 @@ def main():
     parser.add_argument(
         "--splits", nargs="+", default=["train", "valid", "test"]
     )
-    parser.add_argument("--shard_idx", type=int, default=0)
-    parser.add_argument("--num_shards", type=int, default=1)
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--max_examples", type=int, default=-1)
     parser.add_argument("--hpss", action="store_true")
@@ -183,11 +181,10 @@ def main():
             print(f"[skip] split missing: {split_dir}")
             continue
         windows = sorted(p for p in split_dir.iterdir() if p.is_dir())
-        windows = windows[args.shard_idx :: args.num_shards]
         if args.max_examples > 0:
             windows = windows[: args.max_examples]
         print(
-            f"[{split}] shard={args.shard_idx}/{args.num_shards} "
+            f"[{split}] "
             f"-> {len(windows)} windows hpss={args.hpss}"
         )
         for w in tqdm(windows, desc=f"{split}", mininterval=10.0):
