@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://arxiv.org/abs/XXXX.XXXXX"><b>📄 Paper (arXiv)</b></a> ·
   <a href="https://kevin-bretz.github.io/projects/silentmetronome"><b>🔊 Demo page</b></a> ·
-  <a href="https://huggingface.co/WhatzInTheGrass/SilentMetronome"><b>🤗 Pretrained checkpoints</b></a><br>
+  <a href="https://huggingface.co/kevin-bretz/SilentMetronome"><b>🤗 Pretrained checkpoints</b></a><br>
   <sub><i>paper, demo page, and checkpoint repository are being finalised — these links go live soon</i></sub>
 </p>
 
@@ -69,14 +69,14 @@ huggingface-cli download lukewys/stream_music_gen \
 
 ## Pretrained checkpoints
 
-To skip training entirely and jump straight to inference and evaluation, download our released checkpoints from [Hugging Face](https://huggingface.co/WhatzInTheGrass/SilentMetronome) *(repository not live yet — checkpoints for all four models in the results table, plus additional future-visibility variants, are being uploaded soon)*. The layout matches the `models/` directory expected by all scripts:
+To skip training entirely and jump straight to inference and evaluation, download our released checkpoints from [Hugging Face](https://huggingface.co/kevin-bretz/SilentMetronome) *(repository not live yet — checkpoints for all four models in the results table, plus additional future-visibility variants, are being uploaded soon)*. The layout matches the `models/` directory expected by all scripts:
 
 ```bash
 # everything:
-huggingface-cli download WhatzInTheGrass/SilentMetronome --local-dir models/
+huggingface-cli download kevin-bretz/SilentMetronome --local-dir models/
 
 # or a single model, e.g. the full system:
-huggingface-cli download WhatzInTheGrass/SilentMetronome \
+huggingface-cli download kevin-bretz/SilentMetronome \
     --include "pref_dec_online_fv0_k50_beat_phase_dit_mp_cqt_aux_tt_future/*" --local-dir models/
 ```
 
