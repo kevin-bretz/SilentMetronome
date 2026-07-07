@@ -23,21 +23,27 @@ FPS = SR / H
 window = hann(N, sym=False)
 mel_f = librosa.filters.mel(sr=SR, n_fft=N, n_mels=128, fmin=30, fmax=11000).T
 
-model = Demixed_DilatedTransformerModel(
-    attn_len=5,
-    instr=5,
-    ntoken=2,
-    dmodel=256,
-    nhead=8,
-    d_hid=H,
-    nlayers=9,
-    norm_first=True,
-)
+_beat_transformer = None
 
-model.load_state_dict(
-    torch.load(MODEL_PATH, map_location=torch.device("cpu"))["state_dict"]
-)
-model.eval()
+
+def _load_beat_transformer():
+    global _beat_transformer
+    if _beat_transformer is None:
+        _beat_transformer = Demixed_DilatedTransformerModel(
+            attn_len=5,
+            instr=5,
+            ntoken=2,
+            dmodel=256,
+            nhead=8,
+            d_hid=H,
+            nlayers=9,
+            norm_first=True,
+        )
+        _beat_transformer.load_state_dict(
+            torch.load(MODEL_PATH, map_location=torch.device("cpu"))["state_dict"]
+        )
+        _beat_transformer.eval()
+    return _beat_transformer
 
 beat_tracker = DBNBeatTrackingProcessor(
     min_bpm=55.0, max_bpm=215.0, fps=FPS, transition_lambda=10, threshold=0.2
@@ -159,6 +165,7 @@ def compute_beat_alignment_given_path_beat_transformer(
     gt_audio = preprocess_audio(gt_path)
     pred_audio = preprocess_audio(pred_path)
 
+    model = _load_beat_transformer()
     with torch.no_grad():
         context_act, context_tempo = model(
             torch.from_numpy(context_audio).unsqueeze(0).float()
