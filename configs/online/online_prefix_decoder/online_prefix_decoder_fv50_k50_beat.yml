@@ -1,0 +1,21 @@
+$include:
+  - configs/online/online_prefix_decoder/online_prefix_decoder_base.yml
+
+# Non-causal reference (fv=+50, one chunk of look-ahead, no SiMe conditioning,
+# no auxiliary heads) RETRAINED on the _beat re-precompute. The original
+# pref_dec_online_fv50_k50 checkpoint was deleted long before the oldest ZFS
+# snapshot, so the paper's reference row could never be re-evaluated; this run
+# recreates it on the same data pipeline as every other Table-I variant.
+# Recipe mirrors the fv0 baseline resolved args.yml except future_visibility.
+
+data_base_dir: "stream_music_gen_data/precompute_audio_mixdown_20s_beat"
+
+OnlinePrefixDecoderTransformerMultiOut.future_visibility: 50
+OnlinePrefixDecoderTransformerMultiOut.chunk_length: 50
+
+# Explicitly pin the SiMe/aux additions OFF (these are the code defaults,
+# pinned so future default drift can never contaminate the reference row).
+OnlinePrefixDecoderTransformerMultiOut.use_beat_phase_dit_cond: false
+OnlinePrefixDecoderTransformerMultiOut.use_target_token_future_aux_head: false
+use_beat_phase_dit_cond: false
+use_target_token_future_aux_head: false

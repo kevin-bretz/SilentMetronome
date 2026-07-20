@@ -1,0 +1,34 @@
+$include:
+  - configs/online/online_prefix_decoder/online_prefix_decoder_base.yml
+  - configs/online/online_prefix_decoder/online_prefix_decoder_beat_phase_dit_mp_cqt_aux.yml
+
+# AUX-ONLY (Phase-K-matched): the headline Phase K aux heads (multipitch +
+# CQT + target-token-future) with NO conditioning input. This is Phase K with
+# the conditioning ingredient removed, so it isolates whether the auxiliary
+# supervision alone can instil beat structure without an explicit beat-phase
+# conditioning signal. Companion to the Cond-only (phase-stripped) run.
+#
+# fv=0 matches the headline Phase K (fv=0) and every existing sibling
+# (baseline, E cond-only, F cond+aux, G aux-only) so the ablation table stays
+# controlled on a single axis at a time.
+
+OnlinePrefixDecoderTransformerMultiOut.future_visibility: 0
+OnlinePrefixDecoderTransformerMultiOut.chunk_length: 50
+
+# Turn OFF the DiT beat-phase conditioning that the mp_cqt_aux mixin enables.
+# The additive conditioner (use_beat_phase) is already off in that mixin, so
+# this leaves the model with no conditioning input at all.
+OnlinePrefixDecoderTransformerMultiOut.use_beat_phase_dit_cond: false
+
+# Phase K target-stem future-token aux head (CE on patterned target tokens at
+# p+delta), K=3 offsets. Same head set as the fv=0 Phase K headline.
+OnlinePrefixDecoderTransformerMultiOut.use_target_token_future_aux_head: true
+OnlinePrefixDecoderTransformerMultiOut.target_token_future_aux_head_hidden_dim: 256
+OnlinePrefixDecoderTransformerMultiOut.future_aux_offsets: [10, 25, 40]
+
+# Lit module mirror flags.
+use_beat_phase_dit_cond: false
+use_target_token_future_aux_head: true
+target_token_future_aux_head_hidden_dim: 256
+target_token_future_aux_head_weight: !!float 1.0
+future_aux_offsets: [10, 25, 40]

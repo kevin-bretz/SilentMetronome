@@ -1,0 +1,23 @@
+$include:
+  - configs/online/online_prefix_decoder/online_prefix_decoder_base.yml
+  - configs/online/online_prefix_decoder/online_prefix_decoder_beat_phase_dit.yml
+
+# COND-ONLY, PHASE-STRIPPED: DiT beat-phase conditioning with the 4 sin/cos
+# beat/bar phase channels zeroed, leaving only tempo (window + per-frame BPM)
+# and time signature (numerator/denominator + change flags). No aux heads.
+#
+# Ablates the phase content of the conditioning: is it the beat phase, or just
+# the coarse tempo/meter that anyone can supply, that drives the conditioning
+# gains? Against the full DiT cond (Phase E) this isolates the phase signal.
+# Companion to the Aux-only run.
+#
+# fv=0 matches the headline Phase K (fv=0) and every existing sibling. The
+# architecture and parameter count are identical to the full DiT cond; only
+# the phase channels are held at zero (see beat_dit_cond_no_phase).
+
+OnlinePrefixDecoderTransformerMultiOut.future_visibility: 0
+OnlinePrefixDecoderTransformerMultiOut.chunk_length: 50
+OnlinePrefixDecoderTransformerMultiOut.beat_dit_cond_no_phase: true
+
+# Lit module mirror flag.
+beat_dit_cond_no_phase: true

@@ -9,7 +9,9 @@
   <sub><i>paper, demo page, and checkpoint repository are being finalised — these links go live soon</i></sub>
 </p>
 
-SilentMetronome extends [stream-music-gen](https://github.com/lukewys/stream-music-gen) (Wu et al., 2025), a causal transformer that generates a musical accompaniment stem in real time while listening to an incoming mix. The baseline system produces musically plausible audio but drifts off the beat: under strictly causal streaming constraints its accompaniments align poorly with the pulse of the input. SilentMetronome fixes this with two lightweight, architecture-level additions — a *silent metronome* conditioning signal and a set of auxiliary prediction heads — that more than double beat alignment while also improving harmonic coherence.
+SilentMetronome extends [stream-music-gen](https://github.com/lukewys/stream-music-gen) (Wu et al., 2025), a causal transformer that generates a musical accompaniment stem in real time while listening to an incoming mix. The baseline system produces musically plausible audio but drifts off the beat: under strictly causal streaming constraints its accompaniments align poorly with the pulse of the input. SilentMetronome fixes this with two lightweight, architecture-level additions — a *silent metronome* conditioning signal and a set of auxiliary prediction heads — that more than triple beat alignment while also improving harmonic coherence.
+
+> **Scope.** SilentMetronome is a controlled experiment testing whether an explicit metrical-phase conditioning signal improves beat alignment in strictly causal streaming generation. It does **not** address how to obtain that signal in real time: all training and evaluation use the ground-truth beat grid derived from the dataset's MIDI as an oracle. In deployment the signal would come from a shared clock (a DAW, click track, or stage setup) or would have to be estimated by a causal online beat tracker; evaluating tracker-derived conditioning is ongoing follow-up work and not part of this release.
 
 <p align="center">
   <img src="assets/headline_analogy.png" width="720" alt="A human session musician follows the ensemble by internalising the pulse; SilentMetronome gives a streaming model the same silent count-in.">
@@ -21,7 +23,7 @@ SilentMetronome extends [stream-music-gen](https://github.com/lukewys/stream-mus
   <img src="assets/beat_phase_conditioning.png" width="720" alt="Beat-phase conditioning signal construction and per-layer injection.">
 </p>
 
-**1. Silent-metronome (SiMe) conditioning.** From each track's beat grid we compute a per-frame beat-phase signal at the 50 Hz token rate: `[sin 2πφ_beat, cos 2πφ_beat, sin 2πφ_bar, cos 2πφ_bar]`, where `φ_beat` is the phase within the current beat and `φ_bar` the phase within the current bar, plus a time-signature embedding. This is the information a metronome click would carry — but injected silently, as a conditioning signal rather than audio. It enters the decoder through DiT-style per-layer adaptive layer-norm (gain/gate) modulation, which we found far more effective than additive input conditioning.
+**1. Silent-metronome (SiMe) conditioning.** From each track's ground-truth beat grid (tempo and time-signature events from the dataset's MIDI, see [Data preparation](#data-preparation)) we compute a per-frame beat-phase signal at the 50 Hz token rate: `[sin 2πφ_beat, cos 2πφ_beat, sin 2πφ_bar, cos 2πφ_bar]`, where `φ_beat` is the phase within the current beat and `φ_bar` the phase within the current bar, plus tempo descriptors (local and window-level log-tempo, change flags) and learned time-signature embeddings. This is the information a metronome click would carry — but injected silently, as a conditioning signal rather than audio. It enters the decoder through DiT-style per-layer adaptive layer-norm (gain/gate) modulation, which we found far more effective than additive input conditioning.
 
 **2. Auxiliary prediction heads.** Small MLP heads on the decoder trunk are trained to predict, at each frame:
 - the **multipitch** activation of the target stem,
@@ -30,24 +32,27 @@ SilentMetronome extends [stream-music-gen](https://github.com/lukewys/stream-mus
 
 The heads are dropped at inference time, so they add zero latency. They shape the trunk representation toward pitch- and rhythm-aware features, and the future-token heads in particular recover the performance that is otherwise lost when the model must operate with little or no lookahead.
 
-**3. Streaming latency.** Because the beat-phase signal for a chunk is known ahead of time, the per-layer modulation tensors are precomputed for the whole upcoming chunk before decoding starts and applied as elementwise scaling — the conditioning adds no cost to the serial decoding path.
+**3. Streaming latency.** Because the beat-phase signal for a chunk is known ahead of time, the per-layer modulation tensors are precomputed for the whole upcoming chunk before decoding starts and applied as elementwise scaling, leaving attention and KV-cache costs untouched. Measured end to end on an A100 the conditioning adds roughly 5 % to per-chunk generation time (see the [latency benchmark](#latency-benchmark)).
 
 ## Results
 
-Slakh2100 test set, 1024 samples, streaming with 1 s chunks (`chunk_size = 50` frames) and zero lookahead (`future_visibility = 0`):
+Slakh2100 test set, 1024 samples, streaming with 1 s chunks (`chunk_size = 50` frames), zero lookahead (`future_visibility = 0`), and the oracle beat grid. Values are means over five sampling seeds and match Table I of the paper:
 
 | Model | Beat-F ↑ | COCOLA ↑ | FAD ↓ |
 |---|---|---|---|
-| stream-music-gen baseline | 0.184 | 54.28 | 3.64 |
-| + SiMe conditioning | 0.384 | 60.01 | 4.22 |
-| + SiMe + auxiliary heads | **0.436** | **60.85** | 4.28 |
-| *non-causal reference (1 s lookahead)* | *0.319* | *60.98* | *3.35* |
+| stream-music-gen baseline | 0.133 | 58.56 | 5.56 |
+| + auxiliary heads only | 0.133 | 57.93 | 5.46 |
+| + conditioning without phase (tempo + time sig. only) | 0.141 | 57.13 | 4.80 |
+| + SiMe conditioning | 0.380 | 60.03 | **4.25** |
+| + SiMe + auxiliary heads | **0.432** | **60.84** | 4.38 |
+| *non-causal reference (1 s lookahead)* | *0.269* | *61.70* | *5.29* |
+| *ground truth (held-out real stem)* | *0.570* | *66.27* | *—* |
 
 - **Beat-F**: F-measure between beats detected ([Beat This](https://github.com/CPJKU/beat_this)) in the generated stem and beats detected in the input mix.
 - **COCOLA**: harmonic/rhythmic compatibility between the generated stem and the input mix.
-- **FAD**: Fréchet Audio Distance against real stems.
+- **FAD**: Fréchet Audio Distance (VGGish) against real stems.
 
-The full causal system exceeds the beat alignment of — and is on par with the compatibility of — a non-causal reference that is allowed to see one full second of the future mix.
+The full causal system exceeds the beat alignment of — and is within a single point of the compatibility of — a non-causal reference that is allowed to see one full second of the future mix. The auxiliary heads alone, or the conditioning stripped of its phase channels, stay at the baseline level, so the metrical phase signal is the load-bearing component.
 
 ## Installation
 
@@ -69,7 +74,7 @@ huggingface-cli download lukewys/stream_music_gen \
 
 ## Pretrained checkpoints
 
-To skip training entirely and jump straight to inference and evaluation, download our released checkpoints from [Hugging Face](https://huggingface.co/kevin-bretz/SilentMetronome) *(repository not live yet — checkpoints for all four models in the results table, plus additional future-visibility variants, are being uploaded soon)*. The layout matches the `models/` directory expected by all scripts:
+To skip training entirely and jump straight to inference and evaluation, download our released checkpoints from [Hugging Face](https://huggingface.co/kevin-bretz/SilentMetronome) *(repository not live yet — checkpoints for every model row in the results table, plus additional future-visibility variants, are being uploaded soon)*. The layout matches the `models/` directory expected by all scripts:
 
 ```bash
 # everything:
@@ -149,10 +154,14 @@ Key configs (all at `chunk_size = 50`, i.e. 1 s chunks):
 
 | Model | Config |
 |---|---|
-| Baseline (no conditioning) | `online_prefix_decoder_future_visibility_0_chunk_size_50.yml` |
+| Baseline (no conditioning) | `online_prefix_decoder_fv0_k50_beat.yml` |
+| + auxiliary heads only | `online_prefix_decoder_fv0_k50_aux_only_mp_cqt_tt_future.yml` |
+| + conditioning without phase | `online_prefix_decoder_fv0_k50_beat_phase_dit_no_phase.yml` |
 | + SiMe conditioning | `online_prefix_decoder_fv0_k50_beat_phase_dit.yml` |
 | + SiMe + aux heads (full system) | `online_prefix_decoder_fv0_k50_beat_phase_dit_mp_cqt_aux_tt_future.yml` |
-| Non-causal reference (1 s lookahead) | `online_prefix_decoder_fv50_k50_beat_phase_dit_mp_cqt_aux_tt_future.yml` |
+| Non-causal reference (1 s lookahead, no conditioning) | `online_prefix_decoder_fv50_k50_beat.yml` |
+
+The full system also exists as a `fv = +50` variant (`online_prefix_decoder_fv50_k50_beat_phase_dit_mp_cqt_aux_tt_future.yml`) for future-visibility ablations.
 
 `fv` is the future visibility in frames (+50 = 1 s lookahead, 0 = strictly up-to-date, −50 = 1 s behind); variants for other conditioning/aux combinations are in the same directory. Use `--init_from_checkpoint <ckpt>` to warm-start from an existing checkpoint.
 
