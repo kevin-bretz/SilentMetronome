@@ -340,7 +340,7 @@ def test_chroma_aux_with_minimal_dit():
         n.startswith("chroma_cond_projector.") for n, _ in model.named_parameters()
     )
     assert has_chroma_aux, "expected chroma_aux_head params"
-    assert not has_chroma_proj, "Phase A: chroma cond should be off"
+    assert not has_chroma_proj, "aux-only config: chroma cond should be off"
     print("[aux-only-1] chroma aux head present, no chroma cond projector")
 
     B, T = 2, max_duration_frames

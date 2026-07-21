@@ -8,10 +8,10 @@ $include:
 #
 # Ablates the phase content of the conditioning: is it the beat phase, or just
 # the coarse tempo/meter that anyone can supply, that drives the conditioning
-# gains? Against the full DiT cond (Phase E) this isolates the phase signal.
+# gains? Against the full DiT cond this isolates the phase signal.
 # Companion to the Aux-only run.
 #
-# fv=0 matches the headline Phase K (fv=0) and every existing sibling. The
+# fv=0 matches the headline model and every existing sibling. The
 # architecture and parameter count are identical to the full DiT cond; only
 # the phase channels are held at zero (see beat_dit_cond_no_phase).
 
