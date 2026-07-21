@@ -13,7 +13,7 @@
 set -euo pipefail
 
 # Lean smoke test for new aux head wiring. Skips Lightning, dataset
-# loading, and wandb. Just builds the model with the Phase F / Phase G
+# loading, and wandb. Just builds the model with the release
 # flags, runs forward + backward on synthetic tensors, asserts losses
 # are finite and aux head gradients flow.
 

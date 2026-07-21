@@ -16,12 +16,7 @@ fi
 source "${CONF}"
 
 # Auto-set defaults per model type
-if [ "${MODEL_TYPE}" = "dec_online" ]; then
-    : "${TRAIN_STEPS:=100000}"
-    : "${BATCH_SIZE:=$(( 64 / NUM_GPUS ))}"
-    : "${CHECKPOINT_INTERVAL:=10000}"
-    : "${SAMPLE_INTERVAL:=10000}"
-elif [ "${MODEL_TYPE}" = "prefix_decoder_online" ]; then
+if [ "${MODEL_TYPE}" = "prefix_decoder_online" ]; then
     : "${TRAIN_STEPS:=200000}"
     : "${BATCH_SIZE:=$(( 16 / NUM_GPUS ))}"
     : "${CHECKPOINT_INTERVAL:=20000}"

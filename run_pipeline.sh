@@ -52,12 +52,7 @@ fi
 ###############################################################################
 # AUTO-SET DEFAULTS (same logic as submit.sh, in case of manual sbatch)
 ###############################################################################
-if [ "${MODEL_TYPE}" = "dec_online" ]; then
-    : "${TRAIN_STEPS:=100000}"
-    : "${BATCH_SIZE:=$(( 64 / NUM_GPUS ))}"
-    : "${CHECKPOINT_INTERVAL:=10000}"
-    : "${SAMPLE_INTERVAL:=10000}"
-elif [ "${MODEL_TYPE}" = "prefix_decoder_online" ]; then
+if [ "${MODEL_TYPE}" = "prefix_decoder_online" ]; then
     : "${TRAIN_STEPS:=200000}"
     : "${BATCH_SIZE:=$(( 16 / NUM_GPUS ))}"
     : "${CHECKPOINT_INTERVAL:=20000}"
@@ -106,18 +101,13 @@ echo ""
 # STEP 1: RESOLVE MODEL TYPE TO SCRIPTS / CONFIGS
 ###############################################################################
 
-if [ "${MODEL_TYPE}" = "dec_online" ]; then
-    TRAIN_SCRIPT="scripts/train_dec_online.py"
-    BASE_CONFIG="configs/online/decoder_online_base.yml"
-    MODEL_CLASS="DecoderTransformerMultiOut"
-    EVAL_MODEL_TYPE="dec_online"
-elif [ "${MODEL_TYPE}" = "prefix_decoder_online" ]; then
+if [ "${MODEL_TYPE}" = "prefix_decoder_online" ]; then
     TRAIN_SCRIPT="scripts/train_prefix_dec_online.py"
     BASE_CONFIG="configs/online/online_prefix_decoder/online_prefix_decoder_base.yml"
     MODEL_CLASS="OnlinePrefixDecoderTransformerMultiOut"
     EVAL_MODEL_TYPE="prefix_decoder_online"
 else
-    echo "ERROR: Unknown MODEL_TYPE '${MODEL_TYPE}'. Use 'dec_online' or 'prefix_decoder_online'."
+    echo "ERROR: Unknown MODEL_TYPE '${MODEL_TYPE}'. Use 'prefix_decoder_online'."
     exit 1
 fi
 

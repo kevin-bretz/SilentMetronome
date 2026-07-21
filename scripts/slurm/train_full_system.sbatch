@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=smg_phase_c
+#SBATCH --job-name=smg_train_full_system
 #SBATCH --partition=gpu-short
 #SBATCH --time=04:00:00
 #SBATCH --signal=B:SIGTERM@180
@@ -13,18 +13,11 @@
 
 set -euo pipefail
 
-# Phase C: full-cond DiT beat-phase + target-stem chroma aux loss.
-# Self-chains until TARGET_STEPS reached, then optionally launches Phase C
-# eval and Phase D train (both via sbatch) when CHAIN_NEXT=1.
+# Full system at fv=0: DiT beat-phase conditioning plus the multipitch,
+# CQT, and target-token future-aux heads (K=3, [10,25,40]) under the
+# strictly-causal setting, the headline model of the paper.
 #
-# Required: FV in {-50,0,50}
-# Optional: INIT_CKPT, EXP_NAME, TARGET_STEPS, CHAIN_NEXT (default 1)
-
-FV="${FV:?FV must be -50, 0, or 50}"
-case "${FV}" in
-  -50|0|50) : ;;
-  *) echo "ERROR: FV='${FV}' must be one of -50, 0, 50"; exit 1 ;;
-esac
+# Self-chains until TARGET_STEPS reached, then queues eval (cond-on default).
 
 PROJECT_DIR="/zfsstore/user/s4483480/JAM/stream-music-gen"
 cd "${PROJECT_DIR}"
@@ -32,23 +25,25 @@ mkdir -p slurm_logs
 # shellcheck disable=SC1091
 source scripts/slurm/activate_env.sh
 
-CONFIG="configs/online/online_prefix_decoder/online_prefix_decoder_fv${FV}_k50_beat_phase_dit_chroma_aux.yml"
+CONFIG="configs/online/online_prefix_decoder/online_prefix_decoder_fv0_k50_beat_phase_dit_mp_cqt_aux_tt_future.yml"
 INIT_CKPT="${INIT_CKPT:-}"
-EXP_NAME="${EXP_NAME:-pref_dec_online_fv${FV}_k50_beat_phase_dit_chroma_aux}"
+EXP_NAME="${EXP_NAME:-pref_dec_online_fv0_k50_beat_phase_dit_mp_cqt_aux_tt_future}"
 SAVE_DIR="${PROJECT_DIR}/models/${EXP_NAME}"
 TARGET_STEPS="${TARGET_STEPS:-200000}"
 CHAIN_NEXT="${CHAIN_NEXT:-1}"
-CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-20000}"
 
 mkdir -p "${SAVE_DIR}"
 LATEST_BEFORE=$(find "${SAVE_DIR}" -maxdepth 1 -name 'step=*.ckpt' -printf '%f\n' 2>/dev/null \
   | sed -E 's/^step=([0-9]+)\.ckpt$/\1/' | sort -n | tail -1 || true)
 LATEST_BEFORE="${LATEST_BEFORE:-0}"
+
+CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-10000}"
+
 SLOT_TARGET=$(( LATEST_BEFORE + CHECKPOINT_INTERVAL ))
 if (( SLOT_TARGET > TARGET_STEPS )); then SLOT_TARGET=${TARGET_STEPS}; fi
 
 echo "============================================================"
-echo "PHASE C full-cond DiT + chroma aux training: FV=${FV}, k=50"
+echo "Full system @ fv=0 (headline model)"
 echo "  config:      ${CONFIG}"
 echo "  init_ckpt:   ${INIT_CKPT:-<none: training from scratch>}"
 echo "  save_dir:    ${SAVE_DIR}"
@@ -85,6 +80,7 @@ TRAIN_CMD=(
   --args.load "${CONFIG}"
   --save_dir "${SAVE_DIR}"
   --train_steps "${SLOT_TARGET}"
+  --checkpoint_interval "${CHECKPOINT_INTERVAL}"
 )
 if [ -n "${INIT_CKPT}" ]; then
   TRAIN_CMD+=(--init_from_checkpoint "${INIT_CKPT}")
@@ -93,7 +89,7 @@ fi
 PY_PID=$!
 
 WD_GRACE=1800
-WD_STALE=1800
+WD_STALE=5400
 watchdog() {
   sleep "${WD_GRACE}"
   local prev_size=0
@@ -136,38 +132,37 @@ LATEST_STEP=$(find "${SAVE_DIR}" -maxdepth 1 -name 'step=*.ckpt' -printf '%f\n' 
 LATEST_STEP="${LATEST_STEP:-0}"
 echo "[chain] latest step on disk: ${LATEST_STEP}  (target=${TARGET_STEPS})"
 
-if (( LATEST_STEP < TARGET_STEPS )); then
+# Auto-prune intermediate ckpts to cap storage growth during long chained
+# trainings. Keeps only step=${LATEST_STEP}.ckpt (next-slot resume target).
+# Skipped when LATEST_STEP==0 (nothing trained) or when LATEST_STEP <=
+# LATEST_BEFORE (no progress, leave files alone for manual debug).
+if (( LATEST_STEP > LATEST_BEFORE )); then
+  pruned=0
+  for f in "${SAVE_DIR}"/step=*.ckpt; do
+    [ -f "$f" ] || continue
+    [[ "$f" == *"step=${LATEST_STEP}.ckpt" ]] && continue
+    rm -f "$f"
+    pruned=$(( pruned + 1 ))
+  done
+  echo "[chain] pruned ${pruned} intermediate ckpt(s); kept step=${LATEST_STEP}.ckpt"
+fi
+
+if (( LATEST_STEP <= LATEST_BEFORE )); then
+  echo "[chain] no progress this slot (latest=${LATEST_STEP} <= before=${LATEST_BEFORE}); not chaining"
+elif (( LATEST_STEP < TARGET_STEPS )); then
   echo "[chain] not done yet; self-submitting next slot"
   NEXT_JOB=$(sbatch --parsable \
     --job-name="${SLURM_JOB_NAME}" \
-    --export=ALL,FV="${FV}",INIT_CKPT="${INIT_CKPT}",EXP_NAME="${EXP_NAME}",TARGET_STEPS="${TARGET_STEPS}",CHAIN_NEXT="${CHAIN_NEXT}",CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL}" \
-    scripts/slurm/train_phase_c.sbatch)
+    --export=ALL,INIT_CKPT="${INIT_CKPT}",EXP_NAME="${EXP_NAME}",TARGET_STEPS="${TARGET_STEPS}",CHAIN_NEXT="${CHAIN_NEXT}" \
+    scripts/slurm/train_full_system.sbatch)
   echo "[chain] queued next slot: job ${NEXT_JOB}"
 else
-  echo "[chain] PHASE C training complete"
+  echo "[chain] full-system fv=0 training complete"
   if [ "${CHAIN_NEXT}" = "1" ]; then
     CKPT_PATH="${SAVE_DIR}/step=${TARGET_STEPS}.ckpt"
-    echo "[chain] queueing PHASE C eval"
-    EVAL_C=$(sbatch --parsable \
+    EVAL_J=$(sbatch --parsable \
       --export=ALL,MODEL_PATH="${CKPT_PATH}",SPLIT=test \
       scripts/slurm/eval_beat_phase.sbatch)
-    echo "[chain] PHASE C eval job: ${EVAL_C}"
-    # Only launch Phase D if it isn't already running or already started,
-    # so a Phase D submitted manually earlier doesn't get a redundant
-    # launch here.
-    PHASE_D_DIR="${PROJECT_DIR}/models/pref_dec_online_fv${FV}_k50_beat_phase_dit_chroma_aux_cond"
-    PHASE_D_CKPTS=$(find "${PHASE_D_DIR}" -maxdepth 1 -name 'step=*.ckpt' 2>/dev/null | wc -l)
-    PHASE_D_QUEUED=$(squeue -u "${USER}" -h -o "%j" --states=PENDING,RUNNING 2>/dev/null \
-      | grep -cx 'smg_phase_d' || true)
-    if (( PHASE_D_CKPTS > 0 )) || (( PHASE_D_QUEUED > 0 )); then
-      echo "[chain] PHASE D already exists/running (ckpts=${PHASE_D_CKPTS}, queued=${PHASE_D_QUEUED}); skipping launch"
-    else
-      # Do not use --export=ALL here. It would leak Phase C's EXP_NAME
-      # into Phase D and clobber its save_dir.
-      PHASE_D=$(sbatch --parsable \
-        --export=FV="${FV}",CHAIN_NEXT=1 \
-        scripts/slurm/train_phase_d.sbatch)
-      echo "[chain] PHASE D train job: ${PHASE_D}"
-    fi
+    echo "[chain] full-system fv=0 eval (cond-on) job: ${EVAL_J}"
   fi
 fi

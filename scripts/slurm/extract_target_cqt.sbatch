@@ -14,8 +14,7 @@ set -euo pipefail
 
 # CPU array job: extract per-window target-stem CQT from audio (librosa.cqt
 # at 84 bins / 7 octaves / C1-C8). Idempotent.
-# Mirrors extract_input_chroma.sbatch's array breadth, since CQT cost is
-# similar to chroma_cqt cost (both use librosa CQT internals).
+# Array breadth sized for librosa CQT cost per window.
 #
 # Usage:
 #   sbatch scripts/slurm/extract_target_cqt.sbatch

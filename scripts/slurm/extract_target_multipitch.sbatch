@@ -14,7 +14,7 @@ set -euo pipefail
 
 # CPU array job: extract per-window target-stem multipitch + velocity from MIDI.
 # Each array task processes 1/NUM_SHARDS of the windows. Idempotent.
-# Mirrors extract_target_chroma.sbatch.
+# Same sharding pattern as extract_target_cqt.sbatch.
 #
 # Usage:
 #   sbatch scripts/slurm/extract_target_multipitch.sbatch
