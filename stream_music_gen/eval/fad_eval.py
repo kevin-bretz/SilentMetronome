@@ -17,6 +17,8 @@ def calculate_fad(
     metric="vggish",
     verbose=False,
     normalize_rms_per_example=False,
+    background_root_dirs=None,
+    clap_submodel_name: str = "630k-audioset",
 ):
     """
     Calculate FAD score between reference and generated audio files matching
@@ -32,6 +34,12 @@ def calculate_fad(
         verbose (bool): If we should print out outputs
         normalize_rms_per_example (bool): If we should match the rms between reference
             and generated audio.
+        background_root_dirs (list[str], optional): if given, the reference
+            (background) statistics are computed over gt_path files from ALL
+            of these roots instead of root_dir only (e.g. pooled segment
+            references for the LiveBand drift protocol).
+        clap_submodel_name (str): LAION-CLAP checkpoint variant, only used
+            when metric == "clap".
     """
 
     # Initialize FAD calculator
@@ -53,6 +61,15 @@ def calculate_fad(
             verbose=verbose,
             audio_load_worker=1,
         )
+    elif metric == "clap":
+        fad = FrechetAudioDistance(
+            model_name="clap",
+            sample_rate=48000,  # package requirement; resamples internally
+            submodel_name=clap_submodel_name,
+            enable_fusion=False,
+            verbose=verbose,
+            audio_load_worker=1,
+        )
     elif metric == "encodec":
         fad = FrechetAudioDistance(
             model_name="encodec", sample_rate=48000, channels=1, verbose=verbose
@@ -61,7 +78,14 @@ def calculate_fad(
         raise NotImplementedError(f"Unknown metric: {metric}")
 
     # Find files matching patterns
-    ref_files = sorted(glob.glob(os.path.join(root_dir, "*", gt_path)))
+    if background_root_dirs:
+        ref_files = sorted(
+            f
+            for d in background_root_dirs
+            for f in glob.glob(os.path.join(d, "*", gt_path))
+        )
+    else:
+        ref_files = sorted(glob.glob(os.path.join(root_dir, "*", gt_path)))
     gen_files = sorted(glob.glob(os.path.join(root_dir, "*", gen_path)))
 
     fad_score = fad.score(
@@ -74,9 +98,9 @@ def calculate_fad(
 
 
 if __name__ == "__main__":
-    root_dir = "C:/Users/mwang/Documents/eval/model_predictions_stemgen_val_2025_03_14_large_8_rvq/model_predictions_stemgen_val_2025_03_14_large_8_rvq"
+    root_dir = "models/pref_dec_online_fv0_k50_beat_phase_dit_mp_cqt_aux_tt_future/model_predictions"
     gt_path = "ground_truth/pred.wav"
-    gen_path = "stemgen_large_8_rvq/pred.wav"
+    gen_path = "pred/pred.wav"
     metric = "vggish"
 
     fad_score = calculate_fad(

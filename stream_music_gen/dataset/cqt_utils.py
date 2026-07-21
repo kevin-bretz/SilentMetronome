@@ -1,9 +1,9 @@
 """Utilities for computing per-frame Constant-Q Transform (CQT) signals.
 
-Companion to ``chroma_utils.py``. CQT is a log-frequency spectrogram
+CQT is a log-frequency spectrogram
 that places ``bins_per_octave`` (default 12) bins per octave, giving a
 uniform pitch-class resolution that aligns with musical notes and
-preserves register (chroma is octave-folded; CQT is not).
+preserves register across the full pitch range.
 
 Bandwidth is 7 octaves x 12 bins = 84 bins, from C1 (~32 Hz) to C8
 (~4186 Hz). This matches MERT's "music teacher" config and stays within
@@ -40,7 +40,7 @@ def compute_cqt_from_audio(
     (caller may cast to float16 for storage). Per-frame max-normalized
     so values are in [-inf, 0] log scale, with frame-max == 0.
 
-    Frame rate matches ``beat_cond`` / chroma; hop_length is derived from
+    Frame rate matches ``beat_cond``; hop_length is derived from
     ``sample_rate / frame_rate_hz`` (e.g., 32000/50 = 640).
     """
     import librosa
@@ -72,7 +72,7 @@ def compute_cqt_from_audio(
 
     # Log-magnitude with a floor to avoid log(0). Per-frame max-normalize
     # so the frame max is 0 dB and quieter bins are negative, bounding the
-    # range independent of loudness (same convention as the chroma path).
+    # range independent of loudness.
     mag = np.maximum(mag, 1e-7).astype(np.float32)
     log_mag = np.log10(mag)
     row_max = log_mag.max(axis=1, keepdims=True)

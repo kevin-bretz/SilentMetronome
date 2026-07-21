@@ -296,31 +296,6 @@ class PrecomputedTokenDataset(Dataset):
                 )
             item["local_bpm_log"] = torch.from_numpy(local_bpm_log).float()
 
-        # Chroma signals, optional. Present after running
-        # extract_target_chroma.py / extract_input_chroma.py.
-        target_chroma_path = data_dir / "target_chroma.pt"
-        if target_chroma_path.exists():
-            target_chroma = torch.load(
-                target_chroma_path, weights_only=True
-            ).float()[: self.max_frame_length]
-            item["target_chroma"] = target_chroma
-            has_path = data_dir / "target_has_chroma.pt"
-            has = (
-                bool(torch.load(has_path, weights_only=True))
-                if has_path.exists()
-                else True
-            )
-            item["target_has_chroma"] = torch.tensor(
-                1.0 if has else 0.0, dtype=torch.float32
-            )
-
-        input_chroma_path = data_dir / "input_chroma.pt"
-        if input_chroma_path.exists():
-            input_chroma = torch.load(
-                input_chroma_path, weights_only=True
-            ).float()[: self.max_frame_length]
-            item["input_chroma"] = input_chroma
-
         # Multipitch (presence + velocity) and CQT (log-magnitude). All
         # optional, present only after running extract_target_multipitch.py
         # / extract_target_cqt.py against the precomputed window root.
@@ -352,13 +327,6 @@ class PrecomputedTokenDataset(Dataset):
                 target_cqt_path, weights_only=True
             ).float()[: self.max_frame_length]
             item["target_cqt"] = cqt
-
-        input_cqt_path = data_dir / "input_cqt.pt"
-        if input_cqt_path.exists():
-            input_cqt = torch.load(
-                input_cqt_path, weights_only=True
-            ).float()[: self.max_frame_length]
-            item["input_cqt"] = input_cqt
 
         if self.load_audio:
             input_audio_path = data_dir / "input_audio.pt"
@@ -399,7 +367,7 @@ def get_dataloader(
     group_by_track: str = "true",
     filter_stem_by_rms: str = "true",
     shuffle: bool = True,
-    pattern: str = "flatten",  # "flatten", "multilayer" or "stemgen"
+    pattern: str = "flatten",  # "flatten" or "multilayer"
     add_inst_tokens: bool = False,
     copy_target_to_input: bool = False,
 ) -> List[torch.utils.data.DataLoader]:
@@ -425,7 +393,6 @@ def get_dataloader(
         pattern: the pattern to use for the output tokens
             - "flatten": flatten the tokens
             - "multilayer": use multilayer tokens (for musicgendelay-patterning)
-            - "stemgen": use stemgen tokens (for stemgen model)
         add_inst_tokens: Whether to add instrument IDs as conditioning at the beginning of sequences.
         copy_target_to_input: Whether to use the target tokens as input tokens.
 
@@ -466,7 +433,7 @@ def get_dataloader(
 
     # Support multi-layered dataset, where items are [num_rvq_layers, T] (not flattened)
     max_frame_length = duration * frame_rate_hz
-    if pattern == "multilayer" or pattern == "stemgen":
+    if pattern == "multilayer":
         max_token_length = max_frame_length
     else:
         max_token_length = duration * frame_rate_hz * num_rvq_layers
@@ -541,28 +508,6 @@ def get_dataloader(
                 ),
             ]
         )
-    elif pattern == "stemgen":
-        transforms.extend(
-            [
-                CodecTokensToLMTokens(
-                    num_special_tokens=2,  # pad and mask
-                    num_instrument_tokens=0,  # don't need inst tokens for stemgen
-                    num_codebook_per_layer=num_codebook_per_layer,
-                    shared=True,  # All rvq levels have same range of ids.
-                ),
-                PadEmbs(
-                    key="input_emb",
-                    input_length=max_frame_length,
-                ),
-                # Padding is different for multilayer.
-                PadTokens(
-                    key="target_token",
-                    input_length=max_token_length,
-                    multilayer=True,
-                ),
-            ]
-        )
-
     if load_audio:
         transforms.extend(
             [
@@ -745,7 +690,6 @@ def get_precomputed_token_dataloader(
         pattern: the pattern to use for the output tokens
             - "flatten": flatten the tokens
             - "multilayer": use multilayer tokens (for musicgendelay-patterning)
-            - "stemgen": use stemgen tokens (for stemgen model)
         add_inst_tokens: Whether to add instrument IDs as conditioning at the beginning of sequences.
 
     Returns:
@@ -799,18 +743,6 @@ def get_precomputed_token_dataloader(
                 AddSpecialTokens(add_inst_tokens=add_inst_tokens),
             ]
         )
-    elif pattern == "stemgen":
-        transforms.extend(
-            [
-                CodecTokensToLMTokens(
-                    num_special_tokens=2,  # pad and mask
-                    num_instrument_tokens=0,  # don't need inst tokens for stemgen
-                    num_codebook_per_layer=num_codebook_per_layer,
-                    shared=True,  # All rvq levels have same range of ids.
-                ),
-            ]
-        )
-
     if weights is None:
         weights = [1] * len(dataset_names)
 

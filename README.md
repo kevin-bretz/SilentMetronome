@@ -74,7 +74,7 @@ huggingface-cli download lukewys/stream_music_gen \
 
 ## Pretrained checkpoints
 
-To skip training entirely and jump straight to inference and evaluation, download our released checkpoints from [Hugging Face](https://huggingface.co/kevin-bretz/SilentMetronome) *(repository not live yet — checkpoints for every model row in the results table, plus additional future-visibility variants, are being uploaded soon)*. The layout matches the `models/` directory expected by all scripts:
+To skip training entirely and jump straight to inference and evaluation, download our released checkpoints from [Hugging Face](https://huggingface.co/kevin-bretz/SilentMetronome) (one checkpoint for every model row in the results table). The layout matches the `models/` directory expected by all scripts:
 
 ```bash
 # everything:
@@ -161,9 +161,7 @@ Key configs (all at `chunk_size = 50`, i.e. 1 s chunks):
 | + SiMe + aux heads (full system) | `online_prefix_decoder_fv0_k50_beat_phase_dit_mp_cqt_aux_tt_future.yml` |
 | Non-causal reference (1 s lookahead, no conditioning) | `online_prefix_decoder_fv50_k50_beat.yml` |
 
-The full system also exists as a `fv = +50` variant (`online_prefix_decoder_fv50_k50_beat_phase_dit_mp_cqt_aux_tt_future.yml`) for future-visibility ablations.
-
-`fv` is the future visibility in frames (+50 = 1 s lookahead, 0 = strictly up-to-date, −50 = 1 s behind); variants for other conditioning/aux combinations are in the same directory. Use `--init_from_checkpoint <ckpt>` to warm-start from an existing checkpoint.
+`fv` is the future visibility in frames (+50 = 1 s lookahead, 0 = strictly up-to-date, −50 = 1 s behind). Use `--init_from_checkpoint <ckpt>` to warm-start from an existing checkpoint.
 
 ## Evaluation
 
@@ -185,6 +183,41 @@ python scripts/gen_pred/gen_and_evaluate.py \
 
 The script generates accompaniments for the test set and reports Beat-F, COCOLA, and FAD. `--skip_audio_generation`, `--skip_beat_alignment`, `--skip_cocola`, and `--skip_fad` restrict it to specific stages. We recommend 1024 samples for stable FAD/COCOLA estimates.
 
+**Seed averaging.** Every number in the results table is a mean over five sampling seeds. Run the evaluation once per seed and collapse the per-seed JSONs:
+
+```bash
+for SEED in 42 43 44 45 46; do
+    python scripts/gen_pred/gen_and_evaluate.py \
+        --model_type prefix_decoder_online \
+        --model_path models/<EXP_NAME>/step=200000.ckpt \
+        --split test --num_samples 1024 \
+        --seed $SEED --save_dir_name eval_s$SEED
+done
+python scripts/aggregate_seed_results.py logs/eval_results/eval_s4*.json
+```
+
+**Per-instrument evaluation.** Re-scores an existing eval output tree per target-instrument class (drums / bass / harmonic, ids in `configs/eval_inst_groups.json`), reusing the audio already generated, so the run must keep its audio (no `--remove_generation`):
+
+```bash
+python scripts/eval_by_instrument.py \
+    --eval_root models/<EXP_NAME>/eval_s42 \
+    --groups_file configs/eval_inst_groups.json \
+    --results_tag <EXP_NAME>_by_inst
+```
+
+**Long-horizon drift evaluation.** Follows the LiveBand protocol: 20 s continuations generated with a sliding window at the same 1 s chunk size, each scored on its two 10 s halves separately, so the second-half decline measures rhythmic drift past the training horizon. The upstream window dump only fills the first 10 s of each 20 s test window with real audio, so first rebuild the test split into a repaired root, then point the evaluation at it:
+
+```bash
+python scripts/repair_20s_windows.py   # writes precompute_audio_mixdown_20s_beat_fix
+
+python scripts/eval_liveband_protocol.py \
+    --model_path models/<EXP_NAME>/step=200000.ckpt \
+    --data_base_dir stream_music_gen_data/precompute_audio_mixdown_20s_beat_fix \
+    --results_tag <EXP_NAME>_lb20_s42 --seed 42 --fad_background pooled
+```
+
+`scripts/test_sliding_equivalence.py` verifies that the sliding-window generation matches plain generation on sequences within the training horizon.
+
 ## Latency benchmark
 
 To measure the real-time factor of streaming generation (A100 required, matching the paper's setup):
@@ -202,7 +235,7 @@ The script reports per-chunk latency and real-time factors, separating the cold-
 configs/                     Training configs (argbind YAML with $include composition)
 scripts/
   train_prefix_dec_online.py   Main training entry point
-  extract_target_*.py          Aux-head target extraction (multipitch / CQT / chroma)
+  extract_target_*.py          Aux-head target extraction (multipitch / CQT)
   gen_pred/                    Generation and evaluation
 stream_music_gen/
   dataset/                     Data download, tokenization, beat grids, window dumping

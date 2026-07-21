@@ -384,67 +384,6 @@ class MultiOutToLogits(nn.Module):
         return torch.stack([head(x) for head in self.out_heads], dim=1)
 
 
-class BeatPhaseConditioner(nn.Module):
-    """Fuses a per-frame periodic beat/bar signal with per-window BPM and
-    time signature, producing an additive residual for ``input_emb``.
-
-    The per-channel gate is zero-init, so the initial residual is exactly 0
-    and a baseline checkpoint loaded into a beat-phase-enabled model
-    reproduces baseline loss before any fine-tuning. The MLP keeps normal
-    init so the gate sees a nonzero gradient at step 0. If both were
-    zero-init, nothing would update.
-    """
-
-    def __init__(
-        self,
-        input_emb_dim: int,
-        time_sig_vocab_size: int = 16,
-        ts_emb_dim: int = 8,
-        hidden_dim: Optional[int] = None,
-    ):
-        super().__init__()
-        if hidden_dim is None:
-            hidden_dim = input_emb_dim
-        self.input_emb_dim = input_emb_dim
-        self.time_sig_vocab_size = time_sig_vocab_size
-
-        self.ts_emb = nn.Embedding(time_sig_vocab_size, ts_emb_dim)
-        # Per-frame signal: beat_cond (4) + bpm_log (1) + time_sig_emb (ts_emb_dim)
-        in_ch = 4 + 1 + ts_emb_dim
-        self.mlp = nn.Sequential(
-            nn.Linear(in_ch, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, input_emb_dim),
-        )
-
-        self.ln = nn.LayerNorm(input_emb_dim)
-        # Zero-init gate, so the residual is 0 at init (see class docstring).
-        self.gate = nn.Parameter(torch.zeros(input_emb_dim))
-
-    def forward(
-        self,
-        beat_cond: torch.Tensor,
-        bpm_log: torch.Tensor,
-        time_sig_num: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Args:
-            beat_cond:    [B, T, 4] float - (sin/cos beat phase, sin/cos bar phase)
-            bpm_log:      [B]       float - log(bpm / 120)
-            time_sig_num: [B]       long  - clamped to [0, time_sig_vocab_size-1]
-
-        Returns:
-            residual: [B, T, input_emb_dim] float - add to input_emb
-        """
-        B, T, _ = beat_cond.shape
-        ts_idx = time_sig_num.clamp(0, self.time_sig_vocab_size - 1)
-        ts = self.ts_emb(ts_idx).unsqueeze(1).expand(B, T, -1)  # [B,T,ts_emb_dim]
-        bpm = bpm_log.view(B, 1, 1).expand(B, T, 1).to(beat_cond.dtype)
-        h = torch.cat([beat_cond, bpm, ts.to(beat_cond.dtype)], dim=-1)
-        out = self.ln(self.mlp(h)) * self.gate  # gate=0 at init => residual=0
-        return out
-
-
 class BeatPhaseCondProjector(nn.Module):
     """Projects all available per-window + per-frame timing info into a
     ``[B, T, dim_condition]`` tensor for x_transformers' DiT-style adaptive
@@ -458,8 +397,8 @@ class BeatPhaseCondProjector(nn.Module):
     variation within the window without requiring the model to differentiate
     the phase signal.
 
-    Unlike ``BeatPhaseConditioner`` (additive at input), this projector has
-    no gate or LayerNorm of its own. x_transformers' AdaptiveLayerNorm
+    This projector has no gate or LayerNorm of its own, since the modulation
+    is applied per layer downstream. x_transformers' AdaptiveLayerNorm
     zero-inits ``to_gamma`` (identity at step 0) and AdaptiveLayerScale uses
     bias-init=-2 (sigmoid(-2), about 0.12 residual attenuation at step 0),
     following the DiT ada-ln-zero recipe.
@@ -473,7 +412,6 @@ class BeatPhaseCondProjector(nn.Module):
         ts_emb_dim: int = 8,
         ts_den_emb_dim: int = 8,
         hidden_dim: Optional[int] = None,
-        minimal: bool = False,
     ):
         super().__init__()
         if hidden_dim is None:
@@ -481,18 +419,12 @@ class BeatPhaseCondProjector(nn.Module):
         self.dim_condition = dim_condition
         self.time_sig_vocab_size = time_sig_vocab_size
         self.time_sig_den_vocab = time_sig_den_vocab
-        self.minimal = minimal
 
-        if not self.minimal:
-            self.ts_emb = nn.Embedding(time_sig_vocab_size, ts_emb_dim)
-            self.ts_den_emb = nn.Embedding(time_sig_den_vocab, ts_den_emb_dim)
-            # 4 (beat_cond) + 1 (per-frame local_bpm) + 1 (window bpm) +
-            # 1 (ts_change) + 1 (tempo_change) + ts_emb_dim + ts_den_emb_dim
-            in_ch = 4 + 1 + 1 + 1 + 1 + ts_emb_dim + ts_den_emb_dim
-        else:
-            # Minimal projector keeps only the signals that mattered in
-            # ablations, beat_cond (4) plus per-frame local_bpm_log (1).
-            in_ch = 4 + 1
+        self.ts_emb = nn.Embedding(time_sig_vocab_size, ts_emb_dim)
+        self.ts_den_emb = nn.Embedding(time_sig_den_vocab, ts_den_emb_dim)
+        # 4 (beat_cond) + 1 (per-frame local_bpm) + 1 (window bpm) +
+        # 1 (ts_change) + 1 (tempo_change) + ts_emb_dim + ts_den_emb_dim
+        in_ch = 4 + 1 + 1 + 1 + 1 + ts_emb_dim + ts_den_emb_dim
         self.mlp = nn.Sequential(
             nn.Linear(in_ch, hidden_dim),
             nn.GELU(),
@@ -529,13 +461,6 @@ class BeatPhaseCondProjector(nn.Module):
         B, T, _ = beat_cond.shape
         device = beat_cond.device
         dtype = beat_cond.dtype
-
-        if self.minimal:
-            if local_bpm_log is None:
-                local_bpm = bpm_log.view(B, 1, 1).expand(B, T, 1).to(dtype)
-            else:
-                local_bpm = local_bpm_log.to(dtype).unsqueeze(-1)
-            return self.mlp(torch.cat([beat_cond, local_bpm], dim=-1))
 
         ts_num_idx = time_sig_num.clamp(0, self.time_sig_vocab_size - 1)
         ts_num = self.ts_emb(ts_num_idx).unsqueeze(1).expand(B, T, -1).to(dtype)
@@ -579,85 +504,6 @@ class BeatPhaseCondProjector(nn.Module):
         return self.mlp(h)
 
 
-class BeatPhaseAuxHead(nn.Module):
-    """Auxiliary head that predicts per-frame beat_cond
-    ``[sin(φ_beat), cos(φ_beat), sin(φ_bar), cos(φ_bar)]`` from the
-    decoder's pre-logits hidden state ``[B, S, dim]``. Trained with MSE
-    against ground-truth beat_cond. Dropped at inference (zero deployment
-    cost). Pushes the encoder to surface explicit beat-phase representation
-    in its activations even when no explicit beat-phase conditioning is
-    provided.
-    """
-
-    def __init__(self, dim: int, hidden_dim: int = 256, out_dim: int = 4):
-        super().__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, out_dim),
-        )
-
-    def forward(self, hidden: torch.Tensor) -> torch.Tensor:
-        return self.mlp(hidden)
-
-
-class ChromaAuxHead(nn.Module):
-    """Auxiliary head that predicts per-frame target-stem chroma
-    ``[out_dim]`` (pitch-class energies) from the decoder's pre-logits
-    hidden state ``[B, S, dim]``. Dropped at inference.
-
-    With ``linear=True`` the 2-layer MLP is replaced by a single Linear
-    projection, which pushes representational pressure onto the trunk
-    rather than letting the head do its own decoding. With
-    ``n_horizons > 1`` the head predicts ``out_dim`` values at multiple
-    frame offsets at once (concatenated along the last dim, caller builds
-    the multi-horizon target), forcing the trunk to encode harmonic
-    trajectory rather than only the current frame.
-
-    With defaults (``linear=False, n_horizons=1``) the parameter layout
-    matches the original module (``self.mlp.{0,2}.{weight,bias}``), so
-    existing checkpoints load unchanged. The non-default variants use
-    ``self.proj`` as a separate namespace.
-    """
-
-    def __init__(
-        self,
-        dim: int,
-        hidden_dim: int = 256,
-        out_dim: int = 12,
-        linear: bool = False,
-        n_horizons: int = 1,
-    ):
-        super().__init__()
-        self.out_dim = out_dim
-        self.n_horizons = int(n_horizons)
-        total_out = int(out_dim * self.n_horizons)
-        self.linear = bool(linear)
-        if self.linear:
-            self.proj = nn.Linear(dim, total_out)
-        elif self.n_horizons > 1:
-            # Same MLP shape but multi-horizon output. ``proj`` keeps the
-            # namespace separate from the single-horizon ckpt format.
-            self.proj = nn.Sequential(
-                nn.Linear(dim, hidden_dim),
-                nn.GELU(),
-                nn.Linear(hidden_dim, total_out),
-            )
-        else:
-            # Single-frame MLP head keeps the ``self.mlp`` name so
-            # existing checkpoints load with no surgery.
-            self.mlp = nn.Sequential(
-                nn.Linear(dim, hidden_dim),
-                nn.GELU(),
-                nn.Linear(hidden_dim, out_dim),
-            )
-
-    def forward(self, hidden: torch.Tensor) -> torch.Tensor:
-        if self.linear or self.n_horizons > 1:
-            return self.proj(hidden)
-        return self.mlp(hidden)
-
-
 class MultipitchAuxHead(nn.Module):
     """Predicts per-frame target-stem multipitch presence (BCE) from the
     decoder's pre-logits hidden state ``[B, S, dim]``. Output ``[B, S,
@@ -694,57 +540,6 @@ class CQTAuxHead(nn.Module):
 
     def forward(self, hidden: torch.Tensor) -> torch.Tensor:
         return self.mlp(hidden)
-
-
-class MultipitchFutureAuxHead(nn.Module):
-    """Predicts target-stem multipitch presence at K future offsets from the
-    decoder's hidden state at frame t. Output ``[B, S, K, out_dim]``: for
-    each of K offsets δ_k, presence logits at frame t+δ_k. Only meaningful
-    when ``future_visibility > 0`` so the encoder has actually seen the
-    future-mix tokens that supply the answer.
-    """
-
-    def __init__(
-        self, dim: int, hidden_dim: int = 256, out_dim: int = 128,
-        num_offsets: int = 3,
-    ):
-        super().__init__()
-        self.out_dim = out_dim
-        self.num_offsets = num_offsets
-        self.mlp = nn.Sequential(
-            nn.Linear(dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, num_offsets * out_dim),
-        )
-
-    def forward(self, hidden: torch.Tensor) -> torch.Tensor:
-        B, S, _ = hidden.shape
-        out = self.mlp(hidden)
-        return out.view(B, S, self.num_offsets, self.out_dim)
-
-
-class CQTFutureAuxHead(nn.Module):
-    """Same shape as :class:`MultipitchFutureAuxHead` but for CQT log-mag.
-    Output ``[B, S, K, out_dim]``: per-frame K-offset CQT prediction.
-    """
-
-    def __init__(
-        self, dim: int, hidden_dim: int = 256, out_dim: int = 84,
-        num_offsets: int = 3,
-    ):
-        super().__init__()
-        self.out_dim = out_dim
-        self.num_offsets = num_offsets
-        self.mlp = nn.Sequential(
-            nn.Linear(dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, num_offsets * out_dim),
-        )
-
-    def forward(self, hidden: torch.Tensor) -> torch.Tensor:
-        B, S, _ = hidden.shape
-        out = self.mlp(hidden)
-        return out.view(B, S, self.num_offsets, self.out_dim)
 
 
 class TargetTokenFutureAuxHead(nn.Module):
@@ -785,131 +580,6 @@ class TargetTokenFutureAuxHead(nn.Module):
         )
 
 
-class CoupledTargetTokenFutureHead(nn.Module):
-    """Same target as :class:`TargetTokenFutureAuxHead` (predict target-stem
-    DAC tokens at p+δ from h_t) but through the shared main ``to_logits``
-    classifier instead of a separate per-offset projection.
-
-    A shared MLP trunk produces a per-offset residual,
-    ``h_δ = hidden + trunk(hidden + offset_emb(δ))``, and the same
-    per-codebook classifier (``MultiOutToLogits``) used by the main
-    next-token head is applied to each ``h_δ``. Sharing the classifier is
-    the coupling mechanism. Gradient from predicting the token at p+δ
-    flows through the same Linear weights that produce token-at-p logits,
-    so features the trunk learns are also expressed in the main prediction
-    circuit. Param count is O(dim*hidden + num_offsets*dim) regardless of
-    how many offsets are requested.
-
-    ``offset_emb`` and the trunk's last Linear are zero-init, so
-    ``h_δ == hidden`` and logits at step 0 equal the baseline. The
-    classifier still backprops a nonzero gradient into the trunk's last
-    layer at step 0 (same activations, different per-offset targets), so
-    the head specialises from there.
-    """
-
-    def __init__(
-        self, dim: int, num_offsets: int, hidden_dim: int = 256,
-    ):
-        super().__init__()
-        self.num_offsets = int(num_offsets)
-        self.dim = int(dim)
-        self.offset_emb = nn.Embedding(self.num_offsets, self.dim)
-        nn.init.zeros_(self.offset_emb.weight)
-        self.trunk = nn.Sequential(
-            nn.Linear(dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, dim),
-        )
-        nn.init.zeros_(self.trunk[-1].weight)
-        nn.init.zeros_(self.trunk[-1].bias)
-
-    def forward(
-        self, hidden_chunk: torch.Tensor, to_logits: nn.Module,
-    ) -> torch.Tensor:
-        """
-        Args:
-            hidden_chunk: ``[B, S_chunk, dim]`` hidden states at the
-                prediction window only (saves K_off*num_rvq Linear calls).
-            to_logits: parent's ``MultiOutToLogits`` (per-codebook Linear),
-                takes ``[B, S, dim]`` and returns ``[B, num_rvq, S, V]``.
-        Returns:
-            ``[B, num_rvq, S_chunk, K_off, V]``
-        """
-        B, S, D = hidden_chunk.shape
-        K = self.num_offsets
-        # Broadcast offset embedding across (B, S) to [B, S, K, D].
-        h_in = hidden_chunk.unsqueeze(-2) + self.offset_emb.weight.view(
-            1, 1, K, D
-        )
-        h_in = h_in.reshape(B, S * K, D)
-        delta = self.trunk(h_in)
-        # Residual per-offset hidden. Expand hidden over K and add.
-        h_off = hidden_chunk.unsqueeze(-2).expand(B, S, K, D).reshape(
-            B, S * K, D
-        ) + delta
-        # Single batched call into the shared main to_logits.
-        logits = to_logits(h_off)  # [B, num_rvq, S*K, V]
-        num_rvq, V = logits.shape[1], logits.shape[3]
-        return logits.view(B, num_rvq, S, K, V)
-
-
-class BeatPhaseAuxHeadFull(nn.Module):
-    """Auxiliary head predicting the full beat-phase feature set the cond
-    side injects:
-      - 4-d sin/cos beat+bar phase (MSE+cos target via beat_cond)
-      - 1-d bpm_log (MSE target, broadcast per-frame from window scalar)
-      - K-way time-signature numerator logits (CE target)
-    Output layout along the last dim:
-      [phase_4 | bpm_1 | ts_logits_K]
-    """
-
-    def __init__(
-        self,
-        dim: int,
-        hidden_dim: int = 256,
-        time_sig_vocab_size: int = 16,
-    ):
-        super().__init__()
-        self.time_sig_vocab_size = int(time_sig_vocab_size)
-        out_dim = 4 + 1 + self.time_sig_vocab_size
-        self.out_dim = out_dim
-        self.mlp = nn.Sequential(
-            nn.Linear(dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, out_dim),
-        )
-
-    def forward(self, hidden: torch.Tensor) -> torch.Tensor:
-        return self.mlp(hidden)
-
-
-class ChromaCondProjector(nn.Module):
-    """Projects per-frame ``input_chroma [B, T, 12]`` into the DiT
-    condition tensor ``[B, T, dim_condition]``. Output is summed with the
-    beat-phase projection inside ``_build_dit_condition`` to feed both
-    timing and harmonic info through a single AdaptiveLayerNorm /
-    AdaptiveLayerScale path per layer. Two-layer MLP, no extras.
-    """
-
-    def __init__(
-        self,
-        dim_condition: int,
-        chroma_dim: int = 12,
-        hidden_dim: Optional[int] = None,
-    ):
-        super().__init__()
-        if hidden_dim is None:
-            hidden_dim = dim_condition
-        self.mlp = nn.Sequential(
-            nn.Linear(chroma_dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, dim_condition),
-        )
-
-    def forward(self, chroma: torch.Tensor) -> torch.Tensor:
-        return self.mlp(chroma)
-
-
 class DecoderTransformerMultiOut(AutoregressiveWrapper, BaseGenerationMixin):
     """
     Transform Decoder with support for multiple RVQ outputs and delay patterns
@@ -948,52 +618,22 @@ class DecoderTransformerMultiOut(AutoregressiveWrapper, BaseGenerationMixin):
         attention_layer_configs: Optional[dict] = None,
         external_pos: bool = False,
         cond_method: str = "add",
-        use_beat_phase: bool = False,
         time_sig_vocab_size: int = 16,
         use_beat_phase_dit_cond: bool = False,
         beat_dit_cond_dim: Optional[int] = None,
         beat_dit_cond_mlp_expansion: int = 4,
-        beat_dit_cond_minimal: bool = False,
-        cond_dropout_p: float = 0.0,
         beat_phase_noise_std: float = 0.0,
-        use_beat_phase_aux_head: bool = False,
-        beat_phase_aux_head_hidden_dim: int = 256,
-        use_chroma_dit_cond: bool = False,
-        chroma_dim: int = 12,
-        chroma_dit_cond_hidden_dim: Optional[int] = None,
-        use_chroma_aux_head: bool = False,
-        chroma_aux_head_hidden_dim: int = 256,
-        # See ChromaAuxHead docstring. All default to the original behavior.
-        chroma_aux_head_linear: bool = False,
-        chroma_aux_horizons: Optional[Sequence[int]] = None,
-        chroma_aux_deep_supervision_layers: Optional[Sequence[int]] = None,
-        # Multipitch / CQT / beat-phase-full aux heads (all default off).
+        # Multipitch / CQT aux heads (all default off).
         use_multipitch_aux_head: bool = False,
         multipitch_aux_head_hidden_dim: int = 256,
         multipitch_dim: int = 128,
         use_cqt_aux_head: bool = False,
         cqt_aux_head_hidden_dim: int = 256,
         cqt_dim: int = 84,
-        use_input_cqt_aux_head: bool = False,
-        input_cqt_aux_head_hidden_dim: int = 256,
-        input_cqt_dim: int = 84,
-        use_beat_phase_aux_head_full: bool = False,
-        beat_phase_aux_head_full_hidden_dim: int = 256,
-        # Future-mix aux heads (mp / cqt at frame t+δ from h_t). Force the
-        # encoder to use the lookahead. Only valid when future_visibility>0.
-        use_multipitch_future_aux_head: bool = False,
-        multipitch_future_aux_head_hidden_dim: int = 256,
-        use_cqt_future_aux_head: bool = False,
-        cqt_future_aux_head_hidden_dim: int = 256,
         # Future target-stem token prediction at t+δ from h_t. Same
         # vocabulary as the main next-token head, just shifted in time.
         use_target_token_future_aux_head: bool = False,
         target_token_future_aux_head_hidden_dim: int = 256,
-        # Same task, but reuses the main ``to_logits`` classifier so
-        # future-token gradient flows through the same Linear that
-        # produces the present-token logits.
-        use_coupled_target_token_future_head: bool = False,
-        coupled_target_token_future_head_hidden_dim: int = 256,
         future_aux_offsets: Optional[Sequence[int]] = None,
     ):
         # Skip the init of the AutoregressiveWrapper class
@@ -1029,15 +669,7 @@ class DecoderTransformerMultiOut(AutoregressiveWrapper, BaseGenerationMixin):
             beat_dit_cond_dim if beat_dit_cond_dim is not None else dim
         )
         self.beat_dit_cond_mlp_expansion = beat_dit_cond_mlp_expansion
-        self.beat_dit_cond_minimal = bool(beat_dit_cond_minimal)
-        self.cond_dropout_p = float(cond_dropout_p)
         self.beat_phase_noise_std = float(beat_phase_noise_std)
-        # The decoder construction below enables AdaptiveLayerNorm if either
-        # beat or chroma cond is on.
-        self._use_chroma_dit_cond_init = bool(online and use_chroma_dit_cond)
-        self._any_dit_cond = (
-            self.use_beat_phase_dit_cond or self._use_chroma_dit_cond_init
-        )
 
         print("\n")
         print(f"{'Parameter':<15} | {'Value'}")
@@ -1058,7 +690,6 @@ class DecoderTransformerMultiOut(AutoregressiveWrapper, BaseGenerationMixin):
         print(f"{'Online':<15} | {online}")
         print(f"{'Cond Method':<15} | {cond_method}")
         print(f"{'DiT Beat Cond':<15} | {self.use_beat_phase_dit_cond}")
-        print(f"{'Cond Dropout p':<15} | {self.cond_dropout_p}")
         print(f"{'Phase Noise std':<15} | {self.beat_phase_noise_std}")
 
         if cond_method not in ("concat", "add", "film"):
@@ -1073,7 +704,7 @@ class DecoderTransformerMultiOut(AutoregressiveWrapper, BaseGenerationMixin):
         # directly). AdaptiveLayerNorm zero-inits its gamma projection
         # (identity at step 0) and AdaptiveLayerScale uses bias-init=-2,
         # the DiT ada-ln-zero recipe.
-        if self._any_dit_cond:
+        if self.use_beat_phase_dit_cond:
             attention_layer_configs = dict(attention_layer_configs)
             attention_layer_configs.update(
                 use_adaptive_layernorm=True,
@@ -1164,15 +795,6 @@ class DecoderTransformerMultiOut(AutoregressiveWrapper, BaseGenerationMixin):
                     nn.init.zeros_(_last.weight)
                     nn.init.zeros_(_last.bias)
 
-        # Beat-phase conditioning (only when online; otherwise no input_emb path)
-        self.use_beat_phase = bool(online and use_beat_phase)
-        print(f"{'Use Beat Phase':<15} | {self.use_beat_phase}")
-        if self.use_beat_phase:
-            self.beat_conditioner = BeatPhaseConditioner(
-                input_emb_dim=input_emb_dim,
-                time_sig_vocab_size=time_sig_vocab_size,
-            )
-
         # DiT-style per-layer beat-phase conditioning. The projector maps
         # (beat_cond, bpm_log, time_sig_num) to [B, T, dim_condition], which
         # AdaptiveLayerNorm/AdaptiveLayerScale consume per layer. The decoder
@@ -1181,69 +803,7 @@ class DecoderTransformerMultiOut(AutoregressiveWrapper, BaseGenerationMixin):
             self.beat_cond_projector = BeatPhaseCondProjector(
                 dim_condition=self.beat_dit_cond_dim,
                 time_sig_vocab_size=time_sig_vocab_size,
-                minimal=self.beat_dit_cond_minimal,
             )
-
-        # Auxiliary beat-phase head. Predicts beat_cond from the pre-logits
-        # hidden state, MSE loss weighted in the lit module, dropped at
-        # inference. Works standalone (probe whether the encoder can extract
-        # beat purely from audio) or on top of explicit conditioning.
-        self.use_beat_phase_aux_head = bool(online and use_beat_phase_aux_head)
-        print(f"{'Aux Beat Head':<15} | {self.use_beat_phase_aux_head}")
-        if self.use_beat_phase_aux_head:
-            self.beat_phase_aux_head = BeatPhaseAuxHead(
-                dim=dim,
-                hidden_dim=beat_phase_aux_head_hidden_dim,
-                out_dim=4,
-            )
-
-        # Chroma DiT cond projector. Output is summed with the beat-phase
-        # projection in ``_build_dit_condition`` so the AdaptiveLayerNorm
-        # path sees timing and harmonic info through one channel.
-        self.use_chroma_dit_cond = bool(online and use_chroma_dit_cond)
-        self.chroma_dim = chroma_dim
-        if self.use_chroma_dit_cond:
-            self.chroma_cond_projector = ChromaCondProjector(
-                dim_condition=self.beat_dit_cond_dim,
-                chroma_dim=chroma_dim,
-                hidden_dim=chroma_dit_cond_hidden_dim,
-            )
-        self.use_chroma_aux_head = bool(online and use_chroma_aux_head)
-        print(f"{'Chroma DiT Cond':<15} | {self.use_chroma_dit_cond}")
-        print(f"{'Aux Chroma Head':<15} | {self.use_chroma_aux_head}")
-        # Normalize to plain tuples up front so the flags stay simple
-        # value types.
-        chroma_aux_horizons_t: Tuple[int, ...] = tuple(
-            int(h) for h in (chroma_aux_horizons or (0,))
-        )
-        chroma_aux_dsv_layers_t: Tuple[int, ...] = tuple(
-            int(li) for li in (chroma_aux_deep_supervision_layers or ())
-        )
-        self.chroma_aux_head_linear = bool(chroma_aux_head_linear)
-        self.chroma_aux_horizons = chroma_aux_horizons_t
-        self.chroma_aux_deep_supervision_layers = chroma_aux_dsv_layers_t
-        if self.use_chroma_aux_head:
-            n_horizons = len(chroma_aux_horizons_t)
-            self.chroma_aux_head = ChromaAuxHead(
-                dim=dim,
-                hidden_dim=chroma_aux_head_hidden_dim,
-                out_dim=chroma_dim,
-                linear=self.chroma_aux_head_linear,
-                n_horizons=n_horizons,
-            )
-            # Deep-supervision aux heads at intermediate transformer layers.
-            # Empty when ``chroma_aux_deep_supervision_layers`` is unset.
-            if chroma_aux_dsv_layers_t:
-                self.chroma_aux_dsv_heads = nn.ModuleDict({
-                    str(li): ChromaAuxHead(
-                        dim=dim,
-                        hidden_dim=chroma_aux_head_hidden_dim,
-                        out_dim=chroma_dim,
-                        linear=self.chroma_aux_head_linear,
-                        n_horizons=n_horizons,
-                    )
-                    for li in chroma_aux_dsv_layers_t
-                })
 
         # Multipitch aux head (presence + velocity).
         self.use_multipitch_aux_head = bool(online and use_multipitch_aux_head)
@@ -1267,87 +827,17 @@ class DecoderTransformerMultiOut(AutoregressiveWrapper, BaseGenerationMixin):
                 out_dim=self.cqt_dim,
             )
 
-        # Input-mix CQT aux head, supervised against ``input_cqt.pt``.
-        # Forces the hidden state to retain a spectral picture of what the
-        # model is hearing, complementary to the target-stem CQT signal
-        # which says what to generate.
-        self.use_input_cqt_aux_head = bool(online and use_input_cqt_aux_head)
-        self.input_cqt_dim = int(input_cqt_dim)
-        print(f"{'Aux InCQT Head':<15} | {self.use_input_cqt_aux_head}")
-        if self.use_input_cqt_aux_head:
-            self.input_cqt_aux_head = CQTAuxHead(
-                dim=dim,
-                hidden_dim=input_cqt_aux_head_hidden_dim,
-                out_dim=self.input_cqt_dim,
-            )
-
-        # Future aux heads have two different future-visibility requirements.
-        # mp_future / cqt_future / coupled_tt_future predict features at
-        # frame p+δ from h_t and need the encoder to have attended to frame
-        # p+δ (only true when δ <= fv), so they are undefined for fv <= 0.
-        # target_token_future_aux_head only needs the label, which is always
-        # available in the full target stem, so it stays well-defined at any
-        # fv. Without lookahead it just becomes a harder extrapolation task,
-        # which allows a fair comparison without future-input visibility.
-        encoder_lookahead_heads = (
-            online and (
-                use_multipitch_future_aux_head
-                or use_cqt_future_aux_head
-                or use_coupled_target_token_future_head
-            )
-        )
-        any_future_aux_request = (
-            encoder_lookahead_heads
-            or (online and use_target_token_future_aux_head)
-        )
-        if encoder_lookahead_heads and future_visibility <= 0:
-            raise ValueError(
-                "use_multipitch_future_aux_head / use_cqt_future_aux_head / "
-                "use_coupled_target_token_future_head "
-                "require future_visibility > 0 (got "
-                f"future_visibility={future_visibility}). Those heads "
-                "predict frame t+δ from h_t and only have signal when the "
-                "encoder has integrated future-mix tokens."
-            )
+        # Future target-token aux head. It only needs the label, which is
+        # always available in the full target stem, so it stays well-defined
+        # at any fv. Without lookahead it just becomes a harder extrapolation
+        # task, which allows a fair comparison without future-input
+        # visibility.
+        any_future_aux_request = online and use_target_token_future_aux_head
         self.future_aux_offsets = (
             tuple(int(d) for d in (future_aux_offsets or (10, 25, 40)))
             if any_future_aux_request
             else ()
         )
-        if encoder_lookahead_heads:
-            max_off = max(self.future_aux_offsets)
-            if max_off > future_visibility:
-                raise ValueError(
-                    f"max future_aux_offset ({max_off}) exceeds "
-                    f"future_visibility ({future_visibility}); the encoder "
-                    "hasn't seen the target frame."
-                )
-        self.use_multipitch_future_aux_head = bool(
-            online and use_multipitch_future_aux_head
-        )
-        print(
-            f"{'Aux MP-Fut Head':<15} | {self.use_multipitch_future_aux_head}"
-        )
-        if self.use_multipitch_future_aux_head:
-            self.multipitch_future_aux_head = MultipitchFutureAuxHead(
-                dim=dim,
-                hidden_dim=multipitch_future_aux_head_hidden_dim,
-                out_dim=self.multipitch_dim,
-                num_offsets=len(self.future_aux_offsets),
-            )
-        self.use_cqt_future_aux_head = bool(
-            online and use_cqt_future_aux_head
-        )
-        print(
-            f"{'Aux CQT-Fut Head':<15} | {self.use_cqt_future_aux_head}"
-        )
-        if self.use_cqt_future_aux_head:
-            self.cqt_future_aux_head = CQTFutureAuxHead(
-                dim=dim,
-                hidden_dim=cqt_future_aux_head_hidden_dim,
-                out_dim=self.cqt_dim,
-                num_offsets=len(self.future_aux_offsets),
-            )
         self.use_target_token_future_aux_head = bool(
             online and use_target_token_future_aux_head
         )
@@ -1362,39 +852,9 @@ class DecoderTransformerMultiOut(AutoregressiveWrapper, BaseGenerationMixin):
                 num_tokens=num_tokens,
                 num_offsets=len(self.future_aux_offsets),
             )
-        self.use_coupled_target_token_future_head = bool(
-            online and use_coupled_target_token_future_head
-        )
-        print(
-            f"{'Aux TT-Coupled':<15} | "
-            f"{self.use_coupled_target_token_future_head}"
-        )
-        if self.use_coupled_target_token_future_head:
-            self.coupled_target_token_future_head = CoupledTargetTokenFutureHead(
-                dim=dim,
-                num_offsets=len(self.future_aux_offsets),
-                hidden_dim=coupled_target_token_future_head_hidden_dim,
-            )
         if any_future_aux_request:
             print(
                 f"{'Future Aux δ':<15} | {list(self.future_aux_offsets)}"
-            )
-
-        # Beat-phase aux head over the full feature set (phase, bpm,
-        # time_sig). Distinct from ``use_beat_phase_aux_head`` (4-d phase
-        # only).
-        self.use_beat_phase_aux_head_full = bool(
-            online and use_beat_phase_aux_head_full
-        )
-        self.beat_phase_aux_full_ts_vocab = int(time_sig_vocab_size)
-        print(
-            f"{'Aux Beat Full':<15} | {self.use_beat_phase_aux_head_full}"
-        )
-        if self.use_beat_phase_aux_head_full:
-            self.beat_phase_aux_head_full = BeatPhaseAuxHeadFull(
-                dim=dim,
-                hidden_dim=beat_phase_aux_head_full_hidden_dim,
-                time_sig_vocab_size=time_sig_vocab_size,
             )
 
         # Save arguments
@@ -1471,23 +931,8 @@ class DecoderTransformerMultiOut(AutoregressiveWrapper, BaseGenerationMixin):
         self,
         output_tokens,
         input_emb,
-        beat_cond: Optional[torch.Tensor] = None,
-        bpm_log: Optional[torch.Tensor] = None,
-        time_sig_num: Optional[torch.Tensor] = None,
     ):
         embedded_output = self.output_emb(output_tokens)
-
-        # Beat-phase conditioning is an additive residual on input_emb
-        # before ln_in, so the existing normalization absorbs any
-        # distribution shift. A no-op at init (gate=0). Direct attribute
-        # access (not getattr) lets torch.compile constant-fold the branch.
-        if self.use_beat_phase and beat_cond is not None:
-            residual = self.beat_conditioner(
-                beat_cond.to(input_emb.dtype),
-                bpm_log.to(input_emb.dtype),
-                time_sig_num,
-            )
-            input_emb = input_emb + residual
 
         # Optional external positional encodings (kept before normalization)
         if self.external_pos:
@@ -1746,489 +1191,6 @@ class DecoderTransformerMultiOut(AutoregressiveWrapper, BaseGenerationMixin):
         return x
 
 
-class EncoderDecoderTransformerMultiOut(nn.Module):
-    """Encoder-decoder transformer model.
-
-    This class is almost the same as x_transformers.XTransformer, but leaves
-    flexibility to modify the network architecture and condition input method.
-
-    Args:
-        num_rvq_layers (int): Number of RVQ layers in decoder
-        shared (bool): if the token ids in each RVQ level have the same range.
-
-        duplicate_input_in_dec (bool): If True, the input stream is also
-            duplicated in the decoder input, similar to the online case
-        dec_output_emb_dim (int): Dimension to project the output stream to before
-            concatenating with the input stream in the decoder.
-            Only in use when duplicate_input_in_dec is True.
-        Other args are the same as in models.py
-    """
-
-    def __init__(
-        self,
-        enc_dim: int = 512,
-        dec_dim: int = 512,
-        enc_depth: int = 6,
-        dec_depth: int = 6,
-        enc_heads: int = 8,
-        dec_heads: int = 8,
-        enc_num_tokens: int = 1024,
-        dec_num_tokens: int = 1024,
-        enc_max_seq_len: int = 512,
-        dec_max_seq_len: int = 512,
-        attn_dropout: float = 0.0,
-        ff_dropout: float = 0.1,
-        pad_value: int = 0,
-        input_emb_dim: int = 128,
-        num_rvq_layers: int = 4,  # Modified
-        shared: bool = True,
-        duplicate_input_in_dec: bool = False,
-        dec_output_emb_dim: int = 128,
-        attention_layer_configs: Optional[dict] = None,
-    ):
-        super().__init__()
-        if attention_layer_configs is None:
-            attention_layer_configs = {}
-
-        self.input_emb_dim = input_emb_dim
-        encoder_emb = nn.Linear(input_emb_dim, enc_dim)
-
-        self.encoder = TransformerWrapperNoInitEmb(
-            attn_layers=Encoder(
-                dim=enc_dim,
-                depth=enc_depth,
-                heads=enc_heads,
-                attn_dropout=attn_dropout,
-                ff_dropout=ff_dropout,
-                attention_layer_configs=attention_layer_configs,
-            ),
-            num_tokens=enc_num_tokens,
-            max_seq_len=enc_max_seq_len,
-            return_only_embed=True,
-            token_emb=encoder_emb,
-        )
-        self.decoder = DecoderTransformerMultiOut(
-            dim=dec_dim,
-            depth=dec_depth,
-            heads=dec_heads,
-            num_tokens=dec_num_tokens,
-            max_seq_len=dec_max_seq_len,
-            attn_dropout=attn_dropout,
-            ff_dropout=ff_dropout,
-            pad_value=pad_value,
-            cross_attend=True,
-            num_rvq_layers=num_rvq_layers,
-            shared=shared,
-            online=duplicate_input_in_dec,
-            future_visibility=0,
-            input_emb_dim=input_emb_dim,
-            output_emb_dim=dec_dim,
-            attention_layer_configs=attention_layer_configs,
-        )
-
-        # Save arguments
-        self.enc_dim = enc_dim
-        self.dec_dim = dec_dim
-        self.enc_depth = enc_depth
-        self.dec_depth = dec_depth
-        self.enc_heads = enc_heads
-        self.dec_heads = dec_heads
-        self.enc_num_tokens = enc_num_tokens
-        self.dec_num_tokens = dec_num_tokens
-        self.enc_max_seq_len = enc_max_seq_len
-        self.dec_max_seq_len = dec_max_seq_len
-        self.attn_dropout = attn_dropout
-        self.ff_dropout = ff_dropout
-        self.pad_value = pad_value
-
-        self.num_rvq_layers = num_rvq_layers
-        self.shared = shared
-
-        self.duplicate_input_in_dec = duplicate_input_in_dec
-
-    def forward(
-        self,
-        x_enc,
-        x_dec,
-        enc_mask=None,
-        dec_mask=None,
-        return_attn_z_loss=False,
-        dec_inst_tokens=None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Forward pass through encoder-decoder.
-
-        Returns (See DecoderTransformerMultiOut):
-            logits (Tensor): output logits, shape (B, K, T, num_tokens).
-            logits_mask: output logits mask, such that logits[logits_mask]
-                provides only valid logits. Shape (B, K, T)
-            Optional attn_z_loss
-        """
-        if return_attn_z_loss:
-            enc, cache = self.encoder(
-                x_enc,
-                mask=enc_mask,
-                return_embeddings=True,
-                return_attn_z_loss=True,
-            )
-            z_loss_enc = cache.attn_z_loss
-            dec, cache = self.decoder(
-                x_dec,
-                context=enc,
-                context_mask=enc_mask,
-                mask=dec_mask,
-                return_attn_z_loss=True,
-            )
-            z_loss_dec = cache.attn_z_loss
-            return dec, z_loss_enc + z_loss_dec
-        else:
-            enc = self.encoder(x_enc, mask=enc_mask, return_embeddings=True)
-            input_emb = x_enc if self.duplicate_input_in_dec else None
-            dec = self.decoder(
-                x_dec,
-                context=enc,
-                context_mask=enc_mask,
-                mask=dec_mask,
-                inst_tokens=dec_inst_tokens,
-                input_emb=input_emb,
-            )
-            return dec
-
-    @torch.no_grad()
-    def generate(
-        self,
-        seq_in,
-        seq_len,
-        seq_out_start=None,
-        mask=None,
-        attn_mask=None,
-        dec_inst_tokens=None,
-        guidance_scale: float = 1.0,  # parameter for classifier free guidance
-        **kwargs,
-    ) -> torch.Tensor:
-        """
-        Args:
-            seq_in: Encoder input (B, T_enc)
-            seq_len: Output sequence length
-            mask: Encoder attention mask
-            attn_mask: Encoder positional mask
-
-        Returns:
-            Tensor: Generated sequences (B, K, seq_len - 1)
-        """
-        encodings = self.encoder(
-            seq_in, mask=mask, attn_mask=attn_mask, return_embeddings=True
-        )
-        input_emb = seq_in if self.duplicate_input_in_dec else None
-        return self.decoder.generate(
-            seq_len=seq_len,
-            seq_out_start=seq_out_start,
-            context=encodings,
-            context_mask=mask,
-            inst_tokens=dec_inst_tokens,
-            input_emb=input_emb,
-            guidance_scale=guidance_scale,
-            **kwargs,
-        )
-
-
-class PrefixDecoderTransformerMultiOut(
-    AutoregressiveWrapper, BaseGenerationMixin
-):
-    """
-    Simple implementation of a prefix decoder.
-    This is a offline decoder-only model that takes input as prefix and generates the output.
-
-    Transform Decoder with support for multiple RVQ outputs and delay patterns
-    Implements staggered generation strategy for parallel RVQ layer prediction.
-
-    Attributes:
-        num_rvq_layers (int): Number of RVQ layers to predict
-        shared (bool): if the token ids in each RVQ level have the same range.
-
-        online (bool): If True, the model is in online mode and takes in concatenated
-            input and output embeddings.
-        future_visibility (int): Number of tokens to delay the input stream.
-        input_emb_dim (int): Dimension of the input stream embeddings before concatenation.
-        output_emb_dim (int): Dimension of the output stream embeddings before concatenation.
-
-        Other args identical to models.py
-    """
-
-    def __init__(
-        self,
-        dim: int = 512,
-        depth: int = 6,
-        heads: int = 8,
-        num_tokens: int = 1024,
-        max_seq_len: int = 512,
-        attn_dropout: float = 0.0,
-        ff_dropout: float = 0.1,
-        pad_value: int = 0,
-        cross_attend: bool = False,
-        num_rvq_layers: int = 4,  # Modified
-        shared: bool = True,  # Modified
-        input_emb_dim: int = 128,
-        attention_layer_configs: Optional[dict] = None,
-    ):
-
-        # Skip the init of the AutoregressiveWrapper class
-        super(AutoregressiveWrapper, self).__init__()
-
-        if attention_layer_configs is None:
-            attention_layer_configs = {}
-
-        self.output_emb = DelayPatternEmbedder(
-            dim=dim,
-            num_tokens=num_tokens,
-            num_rvq_layers=num_rvq_layers,
-            shared=shared,
-        )
-
-        self.input_emb_dim = input_emb_dim
-        self.input_emb_fc = nn.Linear(input_emb_dim, dim)
-
-        print("\n")
-        print(f"{'Parameter':<15} | {'Value'}")
-        print("-" * 40)
-        print(f"{'Dim':<15} | {dim}")
-        print(f"{'Depth':<15} | {depth}")
-        print(f"{'Heads':<15} | {heads}")
-        print(f"{'Attn Dropout':<15} | {attn_dropout}")
-        print(f"{'FF Dropout':<15} | {ff_dropout}")
-        print(f"{'CrossAttend':<15} | {cross_attend}")
-        print(f"{'Num Tokens':<15} | {num_tokens}")
-        print(f"{'Num RVQ Layers':<15} | {num_rvq_layers}")
-        print(f"{'Max Seq Len':<15} | {max_seq_len}")
-
-        self.decoder = TransformerWrapper(
-            attn_layers=Decoder(
-                dim=dim,
-                depth=depth,
-                heads=heads,
-                attn_dropout=attn_dropout,
-                ff_dropout=ff_dropout,
-                cross_attend=cross_attend,
-                attention_layer_configs=attention_layer_configs,
-            ),
-            num_tokens=num_tokens,
-            max_seq_len=max_seq_len,
-            token_emb=nn.Identity(),  # Needed to circumvent the 'embedding' layer.
-            to_logits=MultiOutToLogits(num_rvq_layers, dim, num_tokens),
-        )
-
-        # Use Delay Pattern
-        delays = list(range(num_rvq_layers))
-        self.pattern_provider = DelayedPatternProvider(
-            n_q=num_rvq_layers, delays=delays
-        )
-
-        # Save arguments
-        self.dim = dim
-        self.depth = depth
-        self.heads = heads
-        self.num_tokens = num_tokens
-        self.max_seq_len = max_seq_len + 1  # +1 for the pattern token
-        self.attn_dropout = attn_dropout
-        self.ff_dropout = ff_dropout
-        self.pad_value = pad_value
-
-        self.num_rvq_layers = num_rvq_layers
-
-        # token used to temporarily pattern things integer id. Will be replaced by inst_tokens.
-        self.temp_token = self.num_tokens
-        self.shared = shared
-
-    @property
-    def net(self):
-        return self.decoder
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        mask: Optional[torch.Tensor] = None,
-        inst_tokens: Optional[torch.Tensor] = None,
-        input_emb: Optional[torch.Tensor] = None,
-        **kwargs,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Forward pass of decoder, used for training.
-
-        Args:
-            x (Tensor): Shape (B, K, T):
-
-        Output:
-            logits (Tensor): output logits, shape (B, K, T, num_tokens).
-            logits_mask: output logits mask, such that logits[logits_mask]
-                provides only valid logits. Shape (B, K, T)
-        """
-
-        B, K, T = x.shape
-        pattern = self.pattern_provider.get_pattern(T)
-        x, _, sequence_mask = pattern.build_pattern_sequence(
-            x,
-            special_token=self.temp_token,
-            keep_only_valid_steps=True,
-        )
-
-        # Replace temporary patterning tokens with inst_tokens
-        x = self._replace_temp_token_with_inst_tokens(x, inst_tokens)
-
-        output_embedded = self.output_emb(x)
-        input_embedded = self.input_emb_fc(input_emb)
-        prefix_length = input_emb.shape[1]
-
-        model_input = torch.cat([input_embedded, output_embedded], dim=1)
-
-        logits = self.decoder(
-            model_input, mask=mask, **kwargs
-        )  # [B, K, S, num_tokens]
-
-        logits = logits[:, :, prefix_length:, :]
-
-        logits = logits.permute(0, 3, 1, 2)  # [B, num_tokens, K, S]
-
-        logits, _, logits_mask = pattern.revert_pattern_logits(
-            logits, float("nan"), keep_only_valid_steps=True
-        )
-
-        logits = logits.permute(0, 2, 3, 1)  # [B, K, T, num_tokens]
-
-        logits_mask = logits_mask.unsqueeze(0).expand(B, *logits_mask.shape)
-        return logits, logits_mask
-
-    @torch.no_grad()
-    @torch.jit.export
-    @eval_decorator
-    def generate(
-        self,
-        seq_len: int,
-        seq_out_start: Optional[torch.Tensor] = None,
-        input_emb: None | torch.Tensor = None,
-        temperature: float = 1.0,
-        filter_logits_fn: (
-            str | Callable | list[str | Callable]
-        ) = top_k_multi_out,
-        filter_kwargs: dict | list[dict] = dict(),
-        cache_kv: bool = True,
-        display_pbar: bool = False,
-        inst_tokens: torch.Tensor = None,
-        guidance_scale: float = 1.0,  # parameter for classifier free guidance
-        **kwargs,
-    ) -> torch.Tensor:
-        """
-        Generate function for multi-RVQ layer decoder models with delay pattern
-        support.
-
-        Args:
-            seq_len (int): Number of steps to generate
-            batch_size (int): Number of sequences to generate
-            temperature (float): Sampling temperature
-            filter_logits_fn: Logit filtering function(s)
-            filter_kwargs: Arguments for filtering functions
-            cache_kv (bool): Cache key/value pairs
-            display_pbar (bool): Show progress bar
-            inst_tokens (torch.Tensor): instrument ids to use as prompt
-            guidance_scale (float): Classifier-free guidance scale
-
-        Returns:
-            Tensor: Generated sequences (B, K, seq_len - 1)
-        """
-        # Validate parameters and get batch_size and device
-        batch_size, device = self._validate_generation_params(
-            inst_tokens, seq_out_start, input_emb, guidance_scale
-        )
-
-        # Process filter functions
-        filter_logits_fn, filter_kwargs = self._process_filter_functions(
-            filter_logits_fn, filter_kwargs
-        )
-
-        # Initialize pattern and output sequence
-        out, prompt_length, post_mask, patterned_seq_out, seq_out_mask = (
-            self._initialize_generation_pattern(
-                seq_len, batch_size, device, seq_out_start, inst_tokens
-            )
-        )
-
-        # Set flags
-        greedy = temperature == 0.0
-
-        # Initialize cache for KV caching
-        cache = None
-
-        # Precompute input embeddings for prefix decoder
-        input_embedded = self.input_emb_fc(input_emb)
-
-        pbar = tqdm(
-            range(prompt_length, seq_len),
-            disable=not display_pbar,
-            desc="Sampling",
-        )
-        for curr_sample_step in pbar:
-            # Prepare model input (prefix-specific logic)
-            embedded = self.output_emb(out)  # [B, S, D]
-            model_input = torch.cat([input_embedded, embedded], dim=1)
-
-            # Forward pass with optional KV caching
-            if cache_kv:
-                logits, intermediates = self.net(
-                    model_input,
-                    mask=None,
-                    cache=cache,
-                    return_intermediates=True,
-                    **kwargs,
-                )
-                # Update cache from intermediates
-                if hasattr(self.net, "can_cache_kv") and self.net.can_cache_kv:
-                    cache = intermediates
-            else:
-                logits = self.net(
-                    model_input,
-                    mask=None,
-                    return_intermediates=False,
-                    **kwargs,
-                )
-
-            logits = logits[:, :, -1]  # Get logits for next token
-
-            # Sample next tokens using mixin method
-            samples = self._sample_next_tokens(
-                logits,
-                temperature,
-                greedy,
-                filter_logits_fn,
-                filter_kwargs,
-                curr_sample_step,
-                out.shape[-1],
-                guidance_scale,
-            )
-
-            out = torch.cat([out, samples], dim=-1)
-
-            # Apply pattern constraints using mixin method
-            out = self._apply_pattern_constraints(
-                out,
-                curr_sample_step,
-                seq_out_start,
-                patterned_seq_out,
-                seq_out_mask,
-                post_mask,
-                inst_tokens,
-            )
-
-        # Finalize generation using mixin method
-        return self._finalize_generation(out, guidance_scale)
-
-    def _replace_temp_token_with_inst_tokens(
-        self, x: torch.Tensor, inst_tokens: torch.Tensor
-    ) -> torch.Tensor:
-        temp_token_mask = x == self.temp_token
-        inst_tokens_expanded = inst_tokens.view(x.shape[0], 1, 1).expand_as(x)
-        x[temp_token_mask] = inst_tokens_expanded[temp_token_mask]
-        return x
-
-
 class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
     """
     Simple implementation of an online chunked prediction model by prefix decoder.
@@ -2270,43 +1232,19 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
         output_emb_dim: int = 128,
         chunk_length: int = 10,
         chunk_start_prob: float = 0.1,
-        use_beat_phase: bool = False,
         time_sig_vocab_size: int = 16,
         use_beat_phase_dit_cond: bool = False,
         beat_dit_cond_dim: Optional[int] = None,
         beat_dit_cond_mlp_expansion: int = 4,
-        beat_dit_cond_minimal: bool = False,
-        cond_dropout_p: float = 0.0,
         beat_phase_noise_std: float = 0.0,
-        use_beat_phase_aux_head: bool = False,
-        beat_phase_aux_head_hidden_dim: int = 256,
-        use_chroma_dit_cond: bool = False,
-        chroma_dim: int = 12,
-        chroma_dit_cond_hidden_dim: Optional[int] = None,
-        use_chroma_aux_head: bool = False,
-        chroma_aux_head_hidden_dim: int = 256,
-        chroma_aux_head_linear: bool = False,
-        chroma_aux_horizons: Optional[Sequence[int]] = None,
-        chroma_aux_deep_supervision_layers: Optional[Sequence[int]] = None,
         use_multipitch_aux_head: bool = False,
         multipitch_aux_head_hidden_dim: int = 256,
         multipitch_dim: int = 128,
         use_cqt_aux_head: bool = False,
         cqt_aux_head_hidden_dim: int = 256,
         cqt_dim: int = 84,
-        use_input_cqt_aux_head: bool = False,
-        input_cqt_aux_head_hidden_dim: int = 256,
-        input_cqt_dim: int = 84,
-        use_beat_phase_aux_head_full: bool = False,
-        beat_phase_aux_head_full_hidden_dim: int = 256,
-        use_multipitch_future_aux_head: bool = False,
-        multipitch_future_aux_head_hidden_dim: int = 256,
-        use_cqt_future_aux_head: bool = False,
-        cqt_future_aux_head_hidden_dim: int = 256,
         use_target_token_future_aux_head: bool = False,
         target_token_future_aux_head_hidden_dim: int = 256,
-        use_coupled_target_token_future_head: bool = False,
-        coupled_target_token_future_head_hidden_dim: int = 256,
         future_aux_offsets: Optional[Sequence[int]] = None,
     ):
         # init with DecoderTransformerMultiOut's init
@@ -2331,43 +1269,19 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
             attention_layer_configs=attention_layer_configs,
             external_pos=False,  # Always disable external position encoding for now.
             cond_method="add",  # Always use add method for now.
-            use_beat_phase=use_beat_phase,
             time_sig_vocab_size=time_sig_vocab_size,
             use_beat_phase_dit_cond=use_beat_phase_dit_cond,
             beat_dit_cond_dim=beat_dit_cond_dim,
             beat_dit_cond_mlp_expansion=beat_dit_cond_mlp_expansion,
-            beat_dit_cond_minimal=beat_dit_cond_minimal,
-            cond_dropout_p=cond_dropout_p,
             beat_phase_noise_std=beat_phase_noise_std,
-            use_beat_phase_aux_head=use_beat_phase_aux_head,
-            beat_phase_aux_head_hidden_dim=beat_phase_aux_head_hidden_dim,
-            use_chroma_dit_cond=use_chroma_dit_cond,
-            chroma_dim=chroma_dim,
-            chroma_dit_cond_hidden_dim=chroma_dit_cond_hidden_dim,
-            use_chroma_aux_head=use_chroma_aux_head,
-            chroma_aux_head_hidden_dim=chroma_aux_head_hidden_dim,
-            chroma_aux_head_linear=chroma_aux_head_linear,
-            chroma_aux_horizons=chroma_aux_horizons,
-            chroma_aux_deep_supervision_layers=chroma_aux_deep_supervision_layers,
             use_multipitch_aux_head=use_multipitch_aux_head,
             multipitch_aux_head_hidden_dim=multipitch_aux_head_hidden_dim,
             multipitch_dim=multipitch_dim,
             use_cqt_aux_head=use_cqt_aux_head,
             cqt_aux_head_hidden_dim=cqt_aux_head_hidden_dim,
             cqt_dim=cqt_dim,
-            use_input_cqt_aux_head=use_input_cqt_aux_head,
-            input_cqt_aux_head_hidden_dim=input_cqt_aux_head_hidden_dim,
-            input_cqt_dim=input_cqt_dim,
-            use_beat_phase_aux_head_full=use_beat_phase_aux_head_full,
-            beat_phase_aux_head_full_hidden_dim=beat_phase_aux_head_full_hidden_dim,
-            use_multipitch_future_aux_head=use_multipitch_future_aux_head,
-            multipitch_future_aux_head_hidden_dim=multipitch_future_aux_head_hidden_dim,
-            use_cqt_future_aux_head=use_cqt_future_aux_head,
-            cqt_future_aux_head_hidden_dim=cqt_future_aux_head_hidden_dim,
             use_target_token_future_aux_head=use_target_token_future_aux_head,
             target_token_future_aux_head_hidden_dim=target_token_future_aux_head_hidden_dim,
-            use_coupled_target_token_future_head=use_coupled_target_token_future_head,
-            coupled_target_token_future_head_hidden_dim=coupled_target_token_future_head_hidden_dim,
             future_aux_offsets=future_aux_offsets,
         )
 
@@ -2386,17 +1300,14 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
         time_sig_change: Optional[torch.Tensor] = None,
         tempo_change: Optional[torch.Tensor] = None,
         local_bpm_log_padded: Optional[torch.Tensor] = None,
-        input_chroma_padded: Optional[torch.Tensor] = None,
     ) -> Optional[torch.Tensor]:
-        """Project the padded conditioning signals (beat phase + chroma)
-        sliced to ``[start_frame:end_frame]`` into a condition tensor consumed
-        by x_transformers' AdaptiveLayerNorm / AdaptiveLayerScale. The beat
-        and chroma projections are summed when both are enabled, since the
-        decoder accepts a single ``[B, T, dim_condition]`` channel per layer.
+        """Project the padded beat-phase conditioning signals sliced to
+        ``[start_frame:end_frame]`` into a condition tensor consumed by
+        x_transformers' AdaptiveLayerNorm / AdaptiveLayerScale.
 
         Returns None if no conditioning is enabled or no signals are
-        provided. ``local_bpm_log_padded`` and ``input_chroma_padded`` mirror
-        ``beat_cond_padded`` along the time axis (same edge-repeat padding).
+        provided. ``local_bpm_log_padded`` mirrors ``beat_cond_padded``
+        along the time axis (same edge-repeat padding).
         """
         cond = None
         if self.use_beat_phase_dit_cond and beat_cond_padded is not None:
@@ -2415,10 +1326,6 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
                 tempo_change=tempo_change,
                 local_bpm_log=local_bpm_slice,
             )
-        if self.use_chroma_dit_cond and input_chroma_padded is not None:
-            ch_slice = input_chroma_padded[:, start_frame:end_frame, :]
-            chroma_cond = self.chroma_cond_projector(ch_slice.to(ref_dtype))
-            cond = chroma_cond if cond is None else cond + chroma_cond
         return cond
 
     @property
@@ -2434,12 +1341,9 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
         bpm_log: Optional[torch.Tensor] = None,
         time_sig_num: Optional[torch.Tensor] = None,
         local_bpm_log: Optional[torch.Tensor] = None,
-        input_chroma: Optional[torch.Tensor] = None,
-        target_chroma: Optional[torch.Tensor] = None,
         target_multipitch: Optional[torch.Tensor] = None,
         target_velocity: Optional[torch.Tensor] = None,
         target_cqt: Optional[torch.Tensor] = None,
-        input_cqt: Optional[torch.Tensor] = None,
         context_length_override: Optional[int] = None,
     ) -> Tuple[torch.Tensor, int, int, torch.Tensor, torch.Tensor]:
         """Prepare input embeddings and output tokens for online training.
@@ -2455,7 +1359,8 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
             input_emb (torch.Tensor): Input embeddings of shape [B, T, D] where D is
                 the embedding dimension.
             beat_cond (torch.Tensor, optional): Per-frame beat/bar phase,
-                shape [B, T, 4]. Only used when ``use_beat_phase=True``.
+                shape [B, T, 4]. Only used when
+                ``use_beat_phase_dit_cond=True``.
             bpm_log (torch.Tensor, optional): Per-sample log(bpm/120), [B].
             time_sig_num (torch.Tensor, optional): Per-sample time signature
                 numerator (long), [B].
@@ -2496,9 +1401,8 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
             0, max_duration_gen, self.chunk_length
         )
         if context_length_override is not None:
-            # Caller imposes a specific context_length (e.g. so a student
-            # and a teacher predict the same target tokens). Must leave
-            # room for the chunk.
+            # Caller imposes a specific context_length instead of sampling
+            # one. Must leave room for the chunk.
             cl = int(context_length_override)
             if cl < 0 or cl + self.chunk_length > max_duration_gen:
                 raise ValueError(
@@ -2541,20 +1445,14 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
                 beat_cond = self.pad_beat_cond_for_delay(beat_cond)
             if local_bpm_log is not None:
                 local_bpm_log = self.pad_local_bpm_for_delay(local_bpm_log)
-            # input_chroma / target_chroma have the same per-frame structure
-            # as beat_cond, so the edge-repeat pad is reused.
-            if input_chroma is not None:
-                input_chroma = self.pad_beat_cond_for_delay(input_chroma)
-            if target_chroma is not None:
-                target_chroma = self.pad_beat_cond_for_delay(target_chroma)
+            # The per-frame feature targets have the same structure as
+            # beat_cond, so the edge-repeat pad is reused.
             if target_multipitch is not None:
                 target_multipitch = self.pad_beat_cond_for_delay(target_multipitch)
             if target_velocity is not None:
                 target_velocity = self.pad_beat_cond_for_delay(target_velocity)
             if target_cqt is not None:
                 target_cqt = self.pad_beat_cond_for_delay(target_cqt)
-            if input_cqt is not None:
-                input_cqt = self.pad_beat_cond_for_delay(input_cqt)
             # Here we +1 to include the BOS.
             context_end_idx += 1
         else:
@@ -2571,9 +1469,6 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
             context_end_idx += self.future_visibility
 
         input_context = input_emb[:, :context_end_idx, :]
-        beat_cond_context = (
-            beat_cond[:, :context_end_idx, :] if beat_cond is not None else None
-        )
         output_context = x_patterned[:, :, :context_end_idx]
         output = x_patterned[
             :, :, context_end_idx : context_end_idx + self.chunk_length
@@ -2589,9 +1484,6 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
         in_embedded = self.get_input_embedding(
             output_context,
             input_context,
-            beat_cond=beat_cond_context,
-            bpm_log=bpm_log,
-            time_sig_num=time_sig_num,
         )
         out_embedded = self.ln_out(self.output_emb(output))
         embedded = torch.cat([in_embedded, out_embedded], dim=1)
@@ -2622,16 +1514,6 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
             if local_bpm_log is not None
             else None
         )
-        input_chroma_aligned = (
-            input_chroma[:, : context_end_idx + self.chunk_length, :]
-            if input_chroma is not None
-            else None
-        )
-        target_chroma_aligned = (
-            target_chroma[:, : context_end_idx + self.chunk_length, :]
-            if target_chroma is not None
-            else None
-        )
         target_multipitch_aligned = (
             target_multipitch[:, : context_end_idx + self.chunk_length, :]
             if target_multipitch is not None
@@ -2647,11 +1529,6 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
             if target_cqt is not None
             else None
         )
-        input_cqt_aligned = (
-            input_cqt[:, : context_end_idx + self.chunk_length, :]
-            if input_cqt is not None
-            else None
-        )
 
         return (
             embedded,
@@ -2661,12 +1538,9 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
             logits_mask,
             beat_cond_aligned,
             local_bpm_aligned,
-            input_chroma_aligned,
-            target_chroma_aligned,
             target_multipitch_aligned,
             target_velocity_aligned,
             target_cqt_aligned,
-            input_cqt_aligned,
             x_patterned_full,
         )
 
@@ -2683,41 +1557,28 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
         time_sig_change: Optional[torch.Tensor] = None,
         tempo_change: Optional[torch.Tensor] = None,
         local_bpm_log: Optional[torch.Tensor] = None,
-        input_chroma: Optional[torch.Tensor] = None,
-        target_chroma: Optional[torch.Tensor] = None,
         target_multipitch: Optional[torch.Tensor] = None,
         target_velocity: Optional[torch.Tensor] = None,
         target_cqt: Optional[torch.Tensor] = None,
-        input_cqt: Optional[torch.Tensor] = None,
         context_length_override: Optional[int] = None,
         **kwargs,
     ) -> Tuple[
         torch.Tensor, torch.Tensor, torch.Tensor,
-        Optional[torch.Tensor], Optional[torch.Tensor],
-        Optional[torch.Tensor], Optional[torch.Tensor],
-        Optional[dict],
         Optional[dict],
     ]:
         """
         Forward pass of decoder, used for training.
 
-        Returns 9-tuple: (logits_pred, logits_mask, targets,
-                           beat_aux_pred, beat_aux_target,
-                           chroma_aux_pred, chroma_aux_target,
-                           chroma_aux_dsv_preds,
-                           extra_aux).
-        Aux fields are None when the corresponding head is disabled.
-        ``chroma_aux_dsv_preds`` is None when deep supervision is off, else
-        a dict {layer_idx: [B, T, K*chroma_dim]} with predictions from each
-        intermediate-layer head.
-        ``extra_aux`` is None when no multipitch/CQT/beat-phase-full aux head
-        is enabled, else a dict with optional keys:
+        Returns 4-tuple: (logits_pred, logits_mask, targets, extra_aux).
+        ``extra_aux`` is None when no aux head is enabled, else a dict with
+        optional keys:
             mp_pred:           [B, S, multipitch_dim]      (presence logits)
             mp_target:         [B, S, multipitch_dim]      (presence binary)
             cqt_pred:          [B, S, cqt_dim]
             cqt_target:        [B, S, cqt_dim]
-            beat_full_pred:    [B, S, 4 + 1 + ts_vocab]
-            beat_full_phase_target: [B, S, 4]
+            tt_future_pred:    [B, num_rvq, chunk, K_off, num_tokens]
+            tt_future_target:  [B, num_rvq, chunk, K_off]
+            tt_future_logits_mask: [B, num_rvq, chunk]
         """
         # Phase-noise injection on beat_cond at training only. Pushes the
         # encoder to use input-mix audio for beat localization rather than
@@ -2738,12 +1599,9 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
             logits_mask,
             beat_cond_aligned,
             local_bpm_aligned,
-            input_chroma_aligned,
-            target_chroma_aligned,
             target_multipitch_aligned,
             target_velocity_aligned,
             target_cqt_aligned,
-            input_cqt_aligned,
             x_patterned_full,
         ) = self.prepare_input(
             x,
@@ -2753,105 +1611,45 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
             bpm_log=bpm_log,
             time_sig_num=time_sig_num,
             local_bpm_log=local_bpm_log,
-            input_chroma=input_chroma,
-            target_chroma=target_chroma,
             target_multipitch=target_multipitch,
             target_velocity=target_velocity,
             target_cqt=target_cqt,
-            input_cqt=input_cqt,
             context_length_override=context_length_override,
         )
 
         # DiT-style per-layer conditioning. condition has shape
-        # [B, S, dim_condition] aligned with ``embedded``. Beat and chroma
-        # projections are summed inside ``_build_dit_condition`` when both
-        # are enabled.
+        # [B, S, dim_condition] aligned with ``embedded``.
         decoder_extra = {}
-        if self.use_beat_phase_dit_cond or self.use_chroma_dit_cond:
-            cond_len = (
-                beat_cond_aligned.shape[1]
-                if beat_cond_aligned is not None
-                else (
-                    input_chroma_aligned.shape[1]
-                    if input_chroma_aligned is not None
-                    else None
-                )
+        if self.use_beat_phase_dit_cond and beat_cond_aligned is not None:
+            condition = self._build_dit_condition(
+                beat_cond_aligned,
+                bpm_log,
+                time_sig_num,
+                start_frame=0,
+                end_frame=beat_cond_aligned.shape[1],
+                ref_dtype=embedded.dtype,
+                time_sig_den=time_sig_den,
+                time_sig_change=time_sig_change,
+                tempo_change=tempo_change,
+                local_bpm_log_padded=local_bpm_aligned,
             )
-            if cond_len is not None:
-                condition = self._build_dit_condition(
-                    beat_cond_aligned,
-                    bpm_log,
-                    time_sig_num,
-                    start_frame=0,
-                    end_frame=cond_len,
-                    ref_dtype=embedded.dtype,
-                    time_sig_den=time_sig_den,
-                    time_sig_change=time_sig_change,
-                    tempo_change=tempo_change,
-                    local_bpm_log_padded=local_bpm_aligned,
-                    input_chroma_padded=input_chroma_aligned,
-                )
-                if condition is not None:
-                    if self.training and self.cond_dropout_p > 0.0:
-                        keep_mask = (
-                            torch.rand(
-                                condition.shape[0], device=condition.device
-                            )
-                            >= self.cond_dropout_p
-                        ).to(condition.dtype)
-                        condition = condition * keep_mask.view(-1, 1, 1)
-                    decoder_extra["condition"] = condition
+            if condition is not None:
+                decoder_extra["condition"] = condition
 
         # When any aux head is on, ask x_transformers to return both logits
-        # and the pre-logits hidden state [B, S, dim]. When chroma deep
-        # supervision is active, also return per-layer intermediates.
+        # and the pre-logits hidden state [B, S, dim].
         any_aux = (
-            self.use_beat_phase_aux_head
-            or self.use_chroma_aux_head
-            or self.use_multipitch_aux_head
+            self.use_multipitch_aux_head
             or self.use_cqt_aux_head
-            or self.use_input_cqt_aux_head
-            or self.use_beat_phase_aux_head_full
-            or self.use_multipitch_future_aux_head
-            or self.use_cqt_future_aux_head
             or self.use_target_token_future_aux_head
-            or self.use_coupled_target_token_future_head
         )
-        need_layer_hiddens = bool(
-            self.use_chroma_aux_head and self.chroma_aux_deep_supervision_layers
-        )
-        layer_hiddens = None
         if any_aux:
-            if need_layer_hiddens:
-                (logits, hidden), intermediates = self.decoder(
-                    embedded,
-                    mask=mask,
-                    return_logits_and_embeddings=True,
-                    return_intermediates=True,
-                    **decoder_extra,
-                    **kwargs,
-                )
-                # One [B, S, dim] tensor per transformer layer
-                # (pre-final-norm), indexed later by
-                # ``chroma_aux_deep_supervision_layers``.
-                layer_hiddens = intermediates.layer_hiddens
-            else:
-                logits, hidden = self.decoder(
-                    embedded,
-                    mask=mask,
-                    return_logits_and_embeddings=True,
-                    **decoder_extra,
-                    **kwargs,
-                )
-            beat_aux_pred = (
-                self.beat_phase_aux_head(hidden)
-                if self.use_beat_phase_aux_head
-                else None
-            )
-            chroma_aux_pred = (
-                self.chroma_aux_head(hidden)
-                if self.use_chroma_aux_head
-                else None
+            logits, hidden = self.decoder(
+                embedded,
+                mask=mask,
+                return_logits_and_embeddings=True,
+                **decoder_extra,
+                **kwargs,
             )
             mp_aux_pred = (
                 self.multipitch_aux_head(hidden)
@@ -2863,118 +1661,24 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
                 if self.use_cqt_aux_head
                 else None
             )
-            input_cqt_aux_pred = (
-                self.input_cqt_aux_head(hidden)
-                if self.use_input_cqt_aux_head
-                else None
-            )
-            beat_full_pred = (
-                self.beat_phase_aux_head_full(hidden)
-                if self.use_beat_phase_aux_head_full
-                else None
-            )
-            mp_future_pred = (
-                self.multipitch_future_aux_head(hidden)
-                if self.use_multipitch_future_aux_head
-                else None
-            )
-            cqt_future_pred = (
-                self.cqt_future_aux_head(hidden)
-                if self.use_cqt_future_aux_head
-                else None
-            )
             tt_future_pred = (
                 self.target_token_future_aux_head(hidden)
                 if self.use_target_token_future_aux_head
                 else None
             )
-            # The coupled head invokes the shared main ``to_logits`` on
-            # per-offset trunk outputs. Only the chunk window is needed for
-            # the loss, so slice first to keep the K_off*num_rvq Linear
-            # calls cheap.
-            if self.use_coupled_target_token_future_head:
-                h_chunk = hidden[:, pred_start_idx:pred_end_idx, :]
-                coupled_tt_future_pred = self.coupled_target_token_future_head(
-                    h_chunk, self.decoder.to_logits,
-                )  # [B, num_rvq, S_chunk, K_off, V]
-            else:
-                coupled_tt_future_pred = None
         else:
             logits = self.decoder(
                 embedded, mask=mask, **decoder_extra, **kwargs
             )
-            beat_aux_pred = None
-            chroma_aux_pred = None
             mp_aux_pred = None
             cqt_aux_pred = None
-            input_cqt_aux_pred = None
-            beat_full_pred = None
-            mp_future_pred = None
-            cqt_future_pred = None
             tt_future_pred = None
-            coupled_tt_future_pred = None
 
-        beat_aux_target = (
-            beat_cond_aligned if self.use_beat_phase_aux_head else None
-        )
-
-        # Build chroma aux target. For multi-horizon prediction,
-        # concatenate horizon-shifted targets along the last dim and slice
-        # the prediction to T_valid. The default (horizons == (0,)) is the
-        # single-frame path.
-        chroma_aux_target = None
-        chroma_aux_dsv_preds: Optional[dict] = None
-        if self.use_chroma_aux_head:
-            if target_chroma_aligned is not None:
-                horizons = self.chroma_aux_horizons
-                if len(horizons) == 1 and horizons[0] == 0:
-                    chroma_aux_target = target_chroma_aligned
-                else:
-                    max_h = max(horizons)
-                    T_full = target_chroma_aligned.shape[1]
-                    T_valid = T_full - max_h
-                    if T_valid <= 0:
-                        # Sequence too short for the requested horizons,
-                        # fall back to single-frame to avoid empty tensors.
-                        chroma_aux_target = target_chroma_aligned
-                    else:
-                        shifted = [
-                            target_chroma_aligned[:, h:h + T_valid, :]
-                            for h in horizons
-                        ]
-                        chroma_aux_target = torch.cat(shifted, dim=-1)
-                        if chroma_aux_pred is not None:
-                            chroma_aux_pred = chroma_aux_pred[:, :T_valid, :]
-            # Run deep-supervision heads at each requested layer index.
-            if (
-                layer_hiddens is not None
-                and self.chroma_aux_deep_supervision_layers
-            ):
-                chroma_aux_dsv_preds = {}
-                for li in self.chroma_aux_deep_supervision_layers:
-                    head = self.chroma_aux_dsv_heads[str(li)]
-                    pred_li = head(layer_hiddens[li])
-                    if (
-                        chroma_aux_target is not None
-                        and pred_li.shape[1] != chroma_aux_target.shape[1]
-                    ):
-                        # Slice DSV preds to T_valid as well when multi-horizon.
-                        pred_li = pred_li[:, :chroma_aux_target.shape[1], :]
-                    chroma_aux_dsv_preds[int(li)] = pred_li
-
-        # Build extra_aux dict for multipitch / CQT / beat-phase-full heads.
-        # All targets are already aligned with hidden along the time axis.
+        # Build extra_aux dict for multipitch / CQT / target-token-future
+        # heads. All targets are already aligned with hidden along the time
+        # axis.
         extra_aux: Optional[dict] = None
-        if (
-            self.use_multipitch_aux_head
-            or self.use_cqt_aux_head
-            or self.use_input_cqt_aux_head
-            or self.use_beat_phase_aux_head_full
-            or self.use_multipitch_future_aux_head
-            or self.use_cqt_future_aux_head
-            or self.use_target_token_future_aux_head
-            or self.use_coupled_target_token_future_head
-        ):
+        if any_aux:
             extra_aux = {}
             if self.use_multipitch_aux_head and mp_aux_pred is not None:
                 extra_aux["mp_pred"] = mp_aux_pred
@@ -2984,68 +1688,6 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
                 extra_aux["cqt_pred"] = cqt_aux_pred
                 if target_cqt_aligned is not None:
                     extra_aux["cqt_target"] = target_cqt_aligned
-            if (
-                self.use_input_cqt_aux_head
-                and input_cqt_aux_pred is not None
-            ):
-                extra_aux["input_cqt_pred"] = input_cqt_aux_pred
-                if input_cqt_aligned is not None:
-                    extra_aux["input_cqt_target"] = input_cqt_aligned
-            if (
-                self.use_beat_phase_aux_head_full
-                and beat_full_pred is not None
-            ):
-                extra_aux["beat_full_pred"] = beat_full_pred
-                if beat_cond_aligned is not None:
-                    extra_aux["beat_full_phase_target"] = beat_cond_aligned
-            # Future aux, predict mp / cqt at frame t+δ_k from h_t.
-            # T_valid = T - max(offsets) so every offset has a target frame.
-            # Pred is [B, S, K, D] from the head, sliced to [:, :T_valid].
-            # Target stacked from offset-shifted slices of aligned features.
-            if self.future_aux_offsets and (
-                self.use_multipitch_future_aux_head
-                or self.use_cqt_future_aux_head
-            ):
-                offsets = self.future_aux_offsets
-                max_off = max(offsets)
-                if (
-                    self.use_multipitch_future_aux_head
-                    and mp_future_pred is not None
-                    and target_multipitch_aligned is not None
-                ):
-                    T_full = target_multipitch_aligned.shape[1]
-                    T_valid = T_full - max_off
-                    if T_valid > 0:
-                        mp_target_future = torch.stack(
-                            [
-                                target_multipitch_aligned[:, k:k + T_valid, :]
-                                for k in offsets
-                            ],
-                            dim=2,
-                        )  # [B, T_valid, K, D]
-                        extra_aux["mp_future_pred"] = (
-                            mp_future_pred[:, :T_valid, :, :]
-                        )
-                        extra_aux["mp_future_target"] = mp_target_future
-                if (
-                    self.use_cqt_future_aux_head
-                    and cqt_future_pred is not None
-                    and target_cqt_aligned is not None
-                ):
-                    T_full = target_cqt_aligned.shape[1]
-                    T_valid = T_full - max_off
-                    if T_valid > 0:
-                        cqt_target_future = torch.stack(
-                            [
-                                target_cqt_aligned[:, k:k + T_valid, :]
-                                for k in offsets
-                            ],
-                            dim=2,
-                        )  # [B, T_valid, K, D]
-                        extra_aux["cqt_future_pred"] = (
-                            cqt_future_pred[:, :T_valid, :, :]
-                        )
-                        extra_aux["cqt_future_target"] = cqt_target_future
             # Target-token future aux, predict target-stem patterned tokens
             # at p+δ from h_t. Hidden positions [pred_start_idx,
             # pred_end_idx) are the same slice the main next-token head
@@ -3082,33 +1724,6 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
                 extra_aux["tt_future_pred"] = pred_window
                 extra_aux["tt_future_target"] = tt_future_target
                 extra_aux["tt_future_logits_mask"] = logits_mask
-            # The coupled head shares the same targets and mask as the
-            # separate-classifier head above, only the prediction pathway
-            # differs. It gets its own keys so both can be enabled side by
-            # side and weighted independently.
-            if (
-                self.future_aux_offsets
-                and self.use_coupled_target_token_future_head
-                and coupled_tt_future_pred is not None
-                and x_patterned_full is not None
-            ):
-                offsets = self.future_aux_offsets
-                context_end_idx = pred_start_idx + 1
-                # Pred axis order [B, num_rvq, S_chunk, K_off, V] is already
-                # produced by CoupledTargetTokenFutureHead, no permute needed.
-                coupled_target_slices = []
-                for delta in offsets:
-                    start = context_end_idx + int(delta) - 1
-                    end = start + self.chunk_length
-                    coupled_target_slices.append(
-                        x_patterned_full[:, :, start:end]
-                    )
-                coupled_tt_future_target = torch.stack(
-                    coupled_target_slices, dim=-1
-                )  # [B, num_rvq, chunk, K_off]
-                extra_aux["coupled_tt_future_pred"] = coupled_tt_future_pred
-                extra_aux["coupled_tt_future_target"] = coupled_tt_future_target
-                extra_aux["coupled_tt_future_logits_mask"] = logits_mask
 
         logits_pred = logits[:, :, pred_start_idx:pred_end_idx, :]
         assert logits_pred.shape[2] > 0
@@ -3116,9 +1731,6 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
         assert logits_pred.shape[2] == targets.shape[2]
         return (
             logits_pred, logits_mask, targets,
-            beat_aux_pred, beat_aux_target,
-            chroma_aux_pred, chroma_aux_target,
-            chroma_aux_dsv_preds,
             extra_aux,
         )
 
@@ -3165,7 +1777,6 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
         time_sig_change: Optional[torch.Tensor] = None,
         tempo_change: Optional[torch.Tensor] = None,
         local_bpm_log_padded: Optional[torch.Tensor] = None,
-        input_chroma_padded: Optional[torch.Tensor] = None,
         dit_modulation_precompute: bool = True,
         **kwargs,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -3219,8 +1830,8 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
         context_len = context_emb.shape[1]
 
         any_dit_cond = (
-            self.use_beat_phase_dit_cond or self.use_chroma_dit_cond
-        ) and (beat_cond_padded is not None or input_chroma_padded is not None)
+            self.use_beat_phase_dit_cond and beat_cond_padded is not None
+        )
 
         # Chunk-ahead modulation precompute, inference only. The KV-cached
         # steps s >= 1 consume the DiT condition for frames
@@ -3249,7 +1860,6 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
                 time_sig_change=time_sig_change,
                 tempo_change=tempo_change,
                 local_bpm_log_padded=local_bpm_log_padded,
-                input_chroma_padded=input_chroma_padded,
             )
             if (
                 pc_cond_chunk is not None
@@ -3299,7 +1909,6 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
                                 time_sig_change=time_sig_change,
                                 tempo_change=tempo_change,
                                 local_bpm_log_padded=local_bpm_log_padded,
-                                input_chroma_padded=input_chroma_padded,
                             )
                     else:
                         if pc_state is not None:
@@ -3316,7 +1925,6 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
                             time_sig_change=time_sig_change,
                             tempo_change=tempo_change,
                             local_bpm_log_padded=local_bpm_log_padded,
-                            input_chroma_padded=input_chroma_padded,
                         )
                     if cond is not None:
                         extra_call_kwargs["condition"] = cond
@@ -3404,7 +2012,6 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
         time_sig_change: Optional[torch.Tensor] = None,
         tempo_change: Optional[torch.Tensor] = None,
         local_bpm_log: Optional[torch.Tensor] = None,
-        input_chroma: Optional[torch.Tensor] = None,
         dit_modulation_precompute: bool = True,
         **kwargs,
     ) -> torch.Tensor:
@@ -3423,7 +2030,7 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
             display_pbar (bool): Show progress bar
             inst_tokens (torch.Tensor): instrument ids to use as prompt
             beat_cond (torch.Tensor, optional): [B, T, 4] per-frame beat/bar
-                phase (sin/cos). Required when use_beat_phase=True.
+                phase (sin/cos). Required when use_beat_phase_dit_cond=True.
             bpm_log (torch.Tensor, optional): [B] log(bpm/120).
             time_sig_num (torch.Tensor, optional): [B] long time-sig numerator.
 
@@ -3463,8 +2070,6 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
                 beat_cond = self.pad_beat_cond_for_delay(beat_cond)
             if local_bpm_log is not None:
                 local_bpm_log = self.pad_local_bpm_for_delay(local_bpm_log)
-            if input_chroma is not None:
-                input_chroma = self.pad_beat_cond_for_delay(input_chroma)
         else:
             output_tokens = self.pad_output_tokens_for_delay(
                 output_tokens, trim_end=False
@@ -3485,15 +2090,9 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
             start_idx = start_indices[i]
             gen_length = gen_lengths[i]
             cur_len = output_tokens.shape[-1]
-            chunk_beat_cond = (
-                beat_cond[:, :cur_len, :] if beat_cond is not None else None
-            )
             input_context = self.get_input_embedding(
                 output_tokens,
                 input_emb[:, :cur_len, :],
-                beat_cond=chunk_beat_cond,
-                bpm_log=bpm_log,
-                time_sig_num=time_sig_num,
             )
 
             chunk_output_tokens = self.generate_chunk(
@@ -3513,7 +2112,212 @@ class OnlinePrefixDecoderTransformerMultiOut(DecoderTransformerMultiOut):
                 time_sig_change=time_sig_change,
                 tempo_change=tempo_change,
                 local_bpm_log_padded=local_bpm_log,
-                input_chroma_padded=input_chroma,
+                dit_modulation_precompute=dit_modulation_precompute,
+                **kwargs,
+            )
+            output_tokens = torch.cat(
+                [output_tokens, chunk_output_tokens], dim=-1
+            )
+
+        # Handle positive future visibility
+        if self.future_visibility > 0:
+            delay_amount = self.future_visibility
+            output_tokens = output_tokens[
+                :, :, delay_amount:
+            ]  # remove the padding for positive future visibility
+
+        return self._finalize_generation(output_tokens)
+
+    def generate_sliding(
+        self,
+        seq_len: int,
+        window_frames: int = 500,
+        hop_frames: Optional[int] = None,
+        seq_out_start: Optional[torch.Tensor] = None,
+        input_emb: None | torch.Tensor = None,
+        temperature: float = 1.0,
+        filter_logits_fn: (
+            str | Callable | list[str | Callable]
+        ) = top_k_multi_out,
+        filter_kwargs: dict | list[dict] = dict(),
+        cache_kv: bool = True,
+        display_pbar: bool = False,
+        inst_tokens: torch.Tensor = None,
+        beat_cond: Optional[torch.Tensor] = None,
+        bpm_log: Optional[torch.Tensor] = None,
+        time_sig_num: Optional[torch.Tensor] = None,
+        time_sig_den: Optional[torch.Tensor] = None,
+        time_sig_change: Optional[torch.Tensor] = None,
+        tempo_change: Optional[torch.Tensor] = None,
+        local_bpm_log: Optional[torch.Tensor] = None,
+        dit_modulation_precompute: bool = True,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Sliding-window variant of ``generate`` for sequences longer than
+        the trained context window.
+
+        The transformer uses learned absolute positions sized for
+        ``max_seq_len`` (~10 s), so ``generate(seq_len=1000)`` is impossible
+        directly. This method streams past that limit: once the running
+        context reaches ``window_frames``, the oldest ``hop_frames`` frames
+        are dropped and the remainder is re-based to position 0. Because the
+        outer chunk loop rebuilds the full fused context every chunk (KV
+        cache is per-chunk) and the delay pattern is shift-invariant, the
+        re-base is pure tensor slicing: the head columns (BOS, plus the
+        future-visibility padding when fv>0) are kept and frames
+        ``[head, head+offset)`` are removed. Input/beat tensors are sliced
+        with the same offset, so the per-chunk input-visibility semantics
+        are exactly those of ``generate``; the only approximation is the
+        truncated history inherent to any sliding window.
+
+        For ``seq_len <= window_frames`` this delegates to ``generate``
+        unchanged; for longer sequences the first ``window_frames`` frames
+        are op-for-op (and RNG-draw-for-draw) identical to ``generate``.
+        """
+        if seq_len <= window_frames:
+            return self.generate(
+                seq_len=seq_len,
+                seq_out_start=seq_out_start,
+                input_emb=input_emb,
+                temperature=temperature,
+                filter_logits_fn=filter_logits_fn,
+                filter_kwargs=filter_kwargs,
+                cache_kv=cache_kv,
+                display_pbar=display_pbar,
+                inst_tokens=inst_tokens,
+                beat_cond=beat_cond,
+                bpm_log=bpm_log,
+                time_sig_num=time_sig_num,
+                time_sig_den=time_sig_den,
+                time_sig_change=time_sig_change,
+                tempo_change=tempo_change,
+                local_bpm_log=local_bpm_log,
+                dit_modulation_precompute=dit_modulation_precompute,
+                **kwargs,
+            )
+
+        if seq_out_start is not None:
+            raise NotImplementedError("Prompting is not supported yet.")
+        if hop_frames is None:
+            hop_frames = self.chunk_length
+        assert window_frames % self.chunk_length == 0, (
+            f"window_frames ({window_frames}) must be a multiple of "
+            f"chunk_length ({self.chunk_length})"
+        )
+        assert hop_frames % self.chunk_length == 0, (
+            f"hop_frames ({hop_frames}) must be a multiple of "
+            f"chunk_length ({self.chunk_length})"
+        )
+        assert 0 < hop_frames < window_frames
+
+        batch_size, device = self._validate_generation_params(
+            inst_tokens, seq_out_start, input_emb, guidance_scale=1.0
+        )
+        filter_logits_fn, filter_kwargs = self._process_filter_functions(
+            filter_logits_fn, filter_kwargs
+        )
+        (
+            output_tokens,
+            prompt_length,
+            post_mask,
+            patterned_seq_out,
+            seq_out_mask,
+        ) = self._initialize_generation_pattern(
+            seq_len, batch_size, device, seq_out_start, inst_tokens
+        )
+
+        if self.future_visibility <= 0:
+            input_emb = self.pad_input_embs_for_delay(input_emb)
+            if beat_cond is not None:
+                beat_cond = self.pad_beat_cond_for_delay(beat_cond)
+            if local_bpm_log is not None:
+                local_bpm_log = self.pad_local_bpm_for_delay(local_bpm_log)
+            # Patterned output has 1 head column (BOS); the padded
+            # input/beat tensors carry a matching pad column at index 0.
+            head_cols = 1
+            cond_head = 1
+        else:
+            output_tokens = self.pad_output_tokens_for_delay(
+                output_tokens, trim_end=False
+            )
+            # (fv - 1) pad columns + BOS; input/beat tensors are unpadded
+            # and frame-indexed (the model reads them fv frames ahead), so
+            # they re-base with a plain shift.
+            head_cols = self.future_visibility
+            cond_head = 0
+
+        def _slice_frames(t, offset):
+            """Drop frames [cond_head, cond_head+offset) along dim 1."""
+            if t is None or offset == 0:
+                return t
+            if cond_head == 0:
+                return t[:, offset:]
+            return torch.cat([t[:, :cond_head], t[:, cond_head + offset :]], dim=1)
+
+        start_indices = np.arange(0, seq_len, self.chunk_length)
+        gen_lengths = np.minimum(self.chunk_length, seq_len - start_indices)
+
+        pbar = tqdm(
+            range(len(start_indices)),
+            disable=not display_pbar,
+            desc="Generating chunks (sliding)",
+        )
+
+        window_offset = 0
+        for i in pbar:
+            start_idx = int(start_indices[i])
+            gen_length = int(gen_lengths[i])
+
+            # Advance the window so context + new chunk fit in window_frames.
+            while (start_idx + gen_length) - window_offset > window_frames:
+                window_offset += hop_frames
+
+            if window_offset == 0:
+                local_out = output_tokens
+                local_input = input_emb
+                local_beat = beat_cond
+                local_bpm = local_bpm_log
+            else:
+                local_out = torch.cat(
+                    [
+                        output_tokens[:, :, :head_cols],
+                        output_tokens[:, :, head_cols + window_offset :],
+                    ],
+                    dim=-1,
+                )
+                local_input = _slice_frames(input_emb, window_offset)
+                local_beat = _slice_frames(beat_cond, window_offset)
+                local_bpm = _slice_frames(local_bpm_log, window_offset)
+
+            cur_len = local_out.shape[-1]
+            chunk_beat_cond = (
+                local_beat[:, :cur_len, :] if local_beat is not None else None
+            )
+            input_context = self.get_input_embedding(
+                local_out,
+                local_input[:, :cur_len, :],
+                beat_cond=chunk_beat_cond,
+                bpm_log=bpm_log,
+                time_sig_num=time_sig_num,
+            )
+
+            chunk_output_tokens = self.generate_chunk(
+                start_idx,  # global: post_mask covers the full seq_len pattern
+                input_context,
+                gen_length,
+                inst_tokens,
+                post_mask,
+                temperature,
+                filter_logits_fn,
+                filter_kwargs,
+                cache_kv,
+                beat_cond_padded=local_beat,
+                bpm_log=bpm_log,
+                time_sig_num=time_sig_num,
+                time_sig_den=time_sig_den,
+                time_sig_change=time_sig_change,
+                tempo_change=tempo_change,
+                local_bpm_log_padded=local_bpm,
                 dit_modulation_precompute=dit_modulation_precompute,
                 **kwargs,
             )

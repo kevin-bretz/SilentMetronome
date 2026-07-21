@@ -251,7 +251,7 @@ class BaseLightningModel(L.LightningModule):
             batch["input_audio"] = batch["input_audio"].to(device)
         if "target_audio" in batch:
             batch["target_audio"] = batch["target_audio"].to(device)
-        # Beat-phase + chroma conditioning / aux signals (all optional).
+        # Beat-phase conditioning / aux signals (all optional).
         for k in (
             "beat_cond",
             "bpm_log",
@@ -260,14 +260,10 @@ class BaseLightningModel(L.LightningModule):
             "time_sig_change",
             "tempo_change",
             "local_bpm_log",
-            "target_chroma",
-            "target_has_chroma",
-            "input_chroma",
             "target_multipitch",
             "target_velocity",
             "target_has_multipitch",
             "target_cqt",
-            "input_cqt",
         ):
             if k in batch and isinstance(batch[k], torch.Tensor):
                 batch[k] = batch[k].to(device)

@@ -43,7 +43,6 @@ def main():
         input_emb_dim=input_emb_dim,
         future_visibility=0,
         chunk_length=chunk_length,
-        use_beat_phase=False,
         use_beat_phase_dit_cond=True,
         beat_dit_cond_dim=dim,
         beat_dit_cond_mlp_expansion=4,
@@ -80,7 +79,7 @@ def main():
     local_bpm_log = torch.randn(B, T, device=device, dtype=dtype) * 0.1
 
     with torch.no_grad():
-        logits, logits_mask, targets, aux_pred, aux_target, c_pred, c_target = model(
+        logits, logits_mask, targets, extra_aux = model(
             x=x,
             inst_tokens=inst_tokens,
             input_emb=input_emb,
@@ -96,11 +95,11 @@ def main():
     print(f"[2] logits shape: {tuple(logits.shape)}")
     print(f"[2] logits_mask shape: {tuple(logits_mask.shape)}")
     print(f"[2] targets shape: {tuple(targets.shape)}")
-    print(f"[2] aux_pred is None (head off): {aux_pred is None}")
+    print(f"[2] extra_aux is None (heads off): {extra_aux is None}")
     print(f"[2] logits finite: {torch.isfinite(logits[logits_mask]).all().item()}")
     assert torch.isfinite(logits[logits_mask]).all()
     assert logits.shape[2] == chunk_length
-    assert aux_pred is None and aux_target is None
+    assert extra_aux is None
 
     # Step 3: a tiny generate()
     # Cap to one chunk so the test runs quickly.
@@ -154,293 +153,5 @@ def main():
     print("\nALL SMOKE TESTS PASSED" if threw else "\nSMOKE TESTS PASSED WITH WARNING")
 
 
-def test_minimal():
-    """Smoke test the minimal variant, which feeds only beat_cond and local_bpm_log."""
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float32
-
-    dim = 64; depth = 4; heads = 8; num_tokens = 1025
-    num_rvq_layers = 4; chunk_length = 5; max_duration_frames = 25; input_emb_dim = 8
-
-    model = OnlinePrefixDecoderTransformerMultiOut(
-        dim=dim, depth=depth, heads=heads, num_tokens=num_tokens,
-        max_seq_len=max_duration_frames + 1, pad_value=0,
-        num_rvq_layers=num_rvq_layers, shared=True, input_emb_dim=input_emb_dim,
-        future_visibility=0, chunk_length=chunk_length,
-        use_beat_phase=False, use_beat_phase_dit_cond=True,
-        beat_dit_cond_dim=dim, beat_dit_cond_mlp_expansion=4,
-        beat_dit_cond_minimal=True,
-    ).to(device=device, dtype=dtype).eval()
-
-    # Projector must be in minimal mode
-    assert model.beat_cond_projector.minimal is True
-    in_lin = model.beat_cond_projector.mlp[0]
-    assert in_lin.in_features == 5, f"expected 5 in-features (4 phase + 1 local_bpm), got {in_lin.in_features}"
-    assert not hasattr(model.beat_cond_projector, "ts_emb"), "ts_emb should not exist in minimal mode"
-    print(f"[MIN-1] projector minimal=True, in_features={in_lin.in_features}, no ts_emb tables")
-
-    B, T = 2, max_duration_frames
-    x = torch.randint(0, num_tokens, (B, num_rvq_layers, T), device=device)
-    inst = torch.zeros(B, dtype=torch.long, device=device)
-    ie = torch.randn(B, T, input_emb_dim, device=device, dtype=dtype)
-    bc = torch.randn(B, T, 4, device=device, dtype=dtype)
-    lbpm = torch.randn(B, T, device=device, dtype=dtype) * 0.1
-
-    with torch.no_grad():
-        logits, lm, _, _, _, _, _ = model(
-            x=x, inst_tokens=inst, input_emb=ie,
-            beat_cond=bc, local_bpm_log=lbpm,
-            # The projector ignores global signals in minimal mode.
-            bpm_log=torch.zeros(B, device=device, dtype=dtype),
-            time_sig_num=torch.full((B,), 4, dtype=torch.long, device=device),
-        )
-    assert torch.isfinite(logits[lm]).all()
-    print(f"[MIN-2] forward OK, logits {tuple(logits.shape)}")
-
-    gen_seq_len = chunk_length
-    with torch.no_grad():
-        gen = model.generate(
-            seq_len=gen_seq_len,
-            input_emb=ie[:, :gen_seq_len, :],
-            inst_tokens=inst,
-            beat_cond=bc[:, :gen_seq_len, :],
-            local_bpm_log=lbpm[:, :gen_seq_len],
-            bpm_log=torch.zeros(B, device=device, dtype=dtype),
-            time_sig_num=torch.full((B,), 4, dtype=torch.long, device=device),
-            cache_kv=True, display_pbar=False, temperature=1.0,
-            filter_logits_fn=["top_k_multi_out"], filter_kwargs=[{"k": 50}],
-        )
-    print(f"[MIN-3] generate OK, output {tuple(gen.shape)}")
-    print("MINIMAL VARIANT SMOKE PASSED")
-
-
-def test_aux_only():
-    """Smoke test the aux-only variant, no DiT cond, just the aux head
-    predicting beat_cond from hidden states."""
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float32
-
-    dim = 64; depth = 4; heads = 8; num_tokens = 1025
-    num_rvq_layers = 4; chunk_length = 5; max_duration_frames = 25; input_emb_dim = 8
-
-    model = OnlinePrefixDecoderTransformerMultiOut(
-        dim=dim, depth=depth, heads=heads, num_tokens=num_tokens,
-        max_seq_len=max_duration_frames + 1, pad_value=0,
-        num_rvq_layers=num_rvq_layers, shared=True, input_emb_dim=input_emb_dim,
-        future_visibility=0, chunk_length=chunk_length,
-        use_beat_phase=False,
-        use_beat_phase_dit_cond=False,
-        use_beat_phase_aux_head=True,
-        beat_phase_aux_head_hidden_dim=32,
-    ).to(device=device, dtype=dtype).eval()
-
-    has_aux = any(n.startswith("beat_phase_aux_head.") for n, _ in model.named_parameters())
-    assert has_aux, "expected beat_phase_aux_head params"
-    has_dit = any(n.startswith("beat_cond_projector.") for n, _ in model.named_parameters())
-    assert not has_dit, "DiT cond should be off"
-    print(f"[AUX-1] aux-head params present, no DiT cond")
-
-    B, T = 2, max_duration_frames
-    x = torch.randint(0, num_tokens, (B, num_rvq_layers, T), device=device)
-    inst = torch.zeros(B, dtype=torch.long, device=device)
-    ie = torch.randn(B, T, input_emb_dim, device=device, dtype=dtype)
-    bc = torch.randn(B, T, 4, device=device, dtype=dtype)
-
-    with torch.no_grad():
-        logits, lm, _, aux_pred, aux_target, _, _ = model(
-            x=x, inst_tokens=inst, input_emb=ie,
-            beat_cond=bc,
-        )
-    assert aux_pred is not None and aux_target is not None
-    # context_end_idx is random, so only check rank and last dim.
-    assert aux_pred.dim() == 3 and aux_pred.shape[0] == B and aux_pred.shape[-1] == 4
-    assert aux_pred.shape == aux_target.shape
-    assert torch.isfinite(aux_pred).all()
-    print(f"[AUX-2] forward OK, aux_pred {tuple(aux_pred.shape)}, aux_target {tuple(aux_target.shape)}")
-
-    # Generate (aux head is not used during generate but model must still run).
-    gen_seq_len = chunk_length
-    with torch.no_grad():
-        gen = model.generate(
-            seq_len=gen_seq_len,
-            input_emb=ie[:, :gen_seq_len, :],
-            inst_tokens=inst,
-            beat_cond=bc[:, :gen_seq_len, :],
-            cache_kv=True, display_pbar=False, temperature=1.0,
-            filter_logits_fn=["top_k_multi_out"], filter_kwargs=[{"k": 50}],
-        )
-    print(f"[AUX-3] generate OK, output {tuple(gen.shape)}")
-    print("AUX-ONLY VARIANT SMOKE PASSED")
-
-
-def test_aux_combined():
-    """Smoke test the aux head and DiT cond combined."""
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float32
-
-    dim = 64; depth = 4; heads = 8; num_tokens = 1025
-    num_rvq_layers = 4; chunk_length = 5; max_duration_frames = 25; input_emb_dim = 8
-
-    model = OnlinePrefixDecoderTransformerMultiOut(
-        dim=dim, depth=depth, heads=heads, num_tokens=num_tokens,
-        max_seq_len=max_duration_frames + 1, pad_value=0,
-        num_rvq_layers=num_rvq_layers, shared=True, input_emb_dim=input_emb_dim,
-        future_visibility=0, chunk_length=chunk_length,
-        use_beat_phase=False,
-        use_beat_phase_dit_cond=True,
-        beat_dit_cond_dim=dim, beat_dit_cond_mlp_expansion=4,
-        use_beat_phase_aux_head=True,
-        beat_phase_aux_head_hidden_dim=32,
-    ).to(device=device, dtype=dtype).eval()
-
-    has_aux = any(n.startswith("beat_phase_aux_head.") for n, _ in model.named_parameters())
-    has_dit = any(n.startswith("beat_cond_projector.") for n, _ in model.named_parameters())
-    assert has_aux and has_dit, "both heads must be present"
-    print("[AUX+DIT-1] both projector and aux head present")
-
-    B, T = 2, max_duration_frames
-    x = torch.randint(0, num_tokens, (B, num_rvq_layers, T), device=device)
-    inst = torch.zeros(B, dtype=torch.long, device=device)
-    ie = torch.randn(B, T, input_emb_dim, device=device, dtype=dtype)
-    bc = torch.randn(B, T, 4, device=device, dtype=dtype)
-    bpm = torch.zeros(B, device=device, dtype=dtype)
-    tsn = torch.full((B,), 4, dtype=torch.long, device=device)
-
-    with torch.no_grad():
-        logits, lm, _, aux_pred, aux_target, _, _ = model(
-            x=x, inst_tokens=inst, input_emb=ie,
-            beat_cond=bc, bpm_log=bpm, time_sig_num=tsn,
-        )
-    assert aux_pred is not None and torch.isfinite(aux_pred).all()
-    print(f"[AUX+DIT-2] forward OK, logits {tuple(logits.shape)}, aux_pred {tuple(aux_pred.shape)}")
-    print("AUX + DIT COMBINED SMOKE PASSED")
-
-
-def test_chroma_aux_with_minimal_dit():
-    """Smoke test minimal DiT beat cond with the chroma aux head only."""
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float32
-    dim = 64; depth = 4; heads = 8; num_tokens = 1025
-    num_rvq_layers = 4; chunk_length = 5; max_duration_frames = 25; input_emb_dim = 8
-
-    model = OnlinePrefixDecoderTransformerMultiOut(
-        dim=dim, depth=depth, heads=heads, num_tokens=num_tokens,
-        max_seq_len=max_duration_frames + 1, pad_value=0,
-        num_rvq_layers=num_rvq_layers, shared=True, input_emb_dim=input_emb_dim,
-        future_visibility=0, chunk_length=chunk_length,
-        use_beat_phase=False,
-        use_beat_phase_dit_cond=True, beat_dit_cond_minimal=True,
-        use_chroma_aux_head=True, chroma_aux_head_hidden_dim=32,
-    ).to(device=device, dtype=dtype).eval()
-
-    has_chroma_aux = any(
-        n.startswith("chroma_aux_head.") for n, _ in model.named_parameters()
-    )
-    has_chroma_proj = any(
-        n.startswith("chroma_cond_projector.") for n, _ in model.named_parameters()
-    )
-    assert has_chroma_aux, "expected chroma_aux_head params"
-    assert not has_chroma_proj, "aux-only config: chroma cond should be off"
-    print("[aux-only-1] chroma aux head present, no chroma cond projector")
-
-    B, T = 2, max_duration_frames
-    x = torch.randint(0, num_tokens, (B, num_rvq_layers, T), device=device)
-    inst = torch.zeros(B, dtype=torch.long, device=device)
-    ie = torch.randn(B, T, input_emb_dim, device=device, dtype=dtype)
-    bc = torch.randn(B, T, 4, device=device, dtype=dtype)
-    lbpm = torch.randn(B, T, device=device, dtype=dtype) * 0.1
-    target_chroma = torch.rand(B, T, 12, device=device, dtype=dtype)
-
-    with torch.no_grad():
-        logits, lm, _, _, _, c_pred, c_tgt = model(
-            x=x, inst_tokens=inst, input_emb=ie,
-            beat_cond=bc, local_bpm_log=lbpm,
-            bpm_log=torch.zeros(B, device=device, dtype=dtype),
-            time_sig_num=torch.full((B,), 4, dtype=torch.long, device=device),
-            target_chroma=target_chroma,
-        )
-    assert c_pred is not None and c_tgt is not None
-    assert c_pred.shape == c_tgt.shape and c_pred.shape[-1] == 12
-    assert torch.isfinite(c_pred).all()
-    print(f"[aux-only-2] forward OK, chroma_aux_pred {tuple(c_pred.shape)}")
-    print("aux-only smoke passed")
-
-
-def test_chroma_cond_aux_combined():
-    """Smoke test minimal DiT beat cond with chroma aux head and chroma cond."""
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float32
-    dim = 64; depth = 4; heads = 8; num_tokens = 1025
-    num_rvq_layers = 4; chunk_length = 5; max_duration_frames = 25; input_emb_dim = 8
-
-    model = OnlinePrefixDecoderTransformerMultiOut(
-        dim=dim, depth=depth, heads=heads, num_tokens=num_tokens,
-        max_seq_len=max_duration_frames + 1, pad_value=0,
-        num_rvq_layers=num_rvq_layers, shared=True, input_emb_dim=input_emb_dim,
-        future_visibility=0, chunk_length=chunk_length,
-        use_beat_phase=False,
-        use_beat_phase_dit_cond=True, beat_dit_cond_minimal=True,
-        use_chroma_dit_cond=True, chroma_dim=12,
-        use_chroma_aux_head=True, chroma_aux_head_hidden_dim=32,
-    ).to(device=device, dtype=dtype).eval()
-
-    has_chroma_proj = any(
-        n.startswith("chroma_cond_projector.") for n, _ in model.named_parameters()
-    )
-    has_chroma_aux = any(
-        n.startswith("chroma_aux_head.") for n, _ in model.named_parameters()
-    )
-    assert has_chroma_proj and has_chroma_aux
-    print("[cond-aux-1] chroma cond projector + aux head both present")
-
-    B, T = 2, max_duration_frames
-    x = torch.randint(0, num_tokens, (B, num_rvq_layers, T), device=device)
-    inst = torch.zeros(B, dtype=torch.long, device=device)
-    ie = torch.randn(B, T, input_emb_dim, device=device, dtype=dtype)
-    bc = torch.randn(B, T, 4, device=device, dtype=dtype)
-    lbpm = torch.randn(B, T, device=device, dtype=dtype) * 0.1
-    in_chroma = torch.rand(B, T, 12, device=device, dtype=dtype)
-    target_chroma = torch.rand(B, T, 12, device=device, dtype=dtype)
-
-    with torch.no_grad():
-        logits, lm, _, _, _, c_pred, c_tgt = model(
-            x=x, inst_tokens=inst, input_emb=ie,
-            beat_cond=bc, local_bpm_log=lbpm,
-            bpm_log=torch.zeros(B, device=device, dtype=dtype),
-            time_sig_num=torch.full((B,), 4, dtype=torch.long, device=device),
-            input_chroma=in_chroma, target_chroma=target_chroma,
-        )
-    assert c_pred is not None and torch.isfinite(c_pred).all()
-    assert torch.isfinite(logits[lm]).all()
-    print(f"[cond-aux-2] forward OK, logits {tuple(logits.shape)}, chroma_aux_pred {tuple(c_pred.shape)}")
-
-    # Generate end-to-end with both cond signals
-    with torch.no_grad():
-        gen = model.generate(
-            seq_len=chunk_length,
-            input_emb=ie[:, :chunk_length, :],
-            inst_tokens=inst,
-            beat_cond=bc[:, :chunk_length, :],
-            local_bpm_log=lbpm[:, :chunk_length],
-            bpm_log=torch.zeros(B, device=device, dtype=dtype),
-            time_sig_num=torch.full((B,), 4, dtype=torch.long, device=device),
-            input_chroma=in_chroma[:, :chunk_length, :],
-            cache_kv=True, display_pbar=False, temperature=1.0,
-            filter_logits_fn=["top_k_multi_out"], filter_kwargs=[{"k": 50}],
-        )
-    print(f"[cond-aux-3] generate OK, output {tuple(gen.shape)}")
-    print("cond+aux smoke passed")
-
-
 if __name__ == "__main__":
     main()
-    print()
-    test_minimal()
-    print()
-    test_aux_only()
-    print()
-    test_aux_combined()
-    print()
-    test_chroma_aux_with_minimal_dit()
-    print()
-    test_chroma_cond_aux_combined()

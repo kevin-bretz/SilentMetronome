@@ -5,8 +5,8 @@
 # target-stem multipitch (BCE on presence + masked MSE on velocity) and
 # target-stem CQT (MSE+cos on 84-bin log-mag). Tests whether richer aux
 # supervision (note identity + spectral envelope) on top of explicit
-# beat-phase cond improves over the chroma-aux-only recipe. Compared with
-# the aux-only variant, this isolates cond + rich aux vs rich aux only.
+# beat-phase cond improves generation. Compared with the aux-only
+# variant, this isolates cond + rich aux vs rich aux only.
 
 data_base_dir: "stream_music_gen_data/precompute_audio_mixdown_20s_beat"
 
@@ -22,13 +22,10 @@ LinearWarmupCosineDecay.warmup_iters: 10000
 LinearWarmupCosineDecay.total_iters: 200000
 LinearWarmupCosineDecay.eta_min: !!float 1e-5
 
-# Model: full DiT beat cond + multipitch aux + CQT aux. No chroma anything.
-OnlinePrefixDecoderTransformerMultiOut.use_beat_phase: false
+# Model: full DiT beat cond + multipitch aux + CQT aux.
 OnlinePrefixDecoderTransformerMultiOut.use_beat_phase_dit_cond: true
 OnlinePrefixDecoderTransformerMultiOut.beat_dit_cond_mlp_expansion: 4
 OnlinePrefixDecoderTransformerMultiOut.time_sig_vocab_size: 16
-OnlinePrefixDecoderTransformerMultiOut.use_chroma_dit_cond: false
-OnlinePrefixDecoderTransformerMultiOut.use_chroma_aux_head: false
 OnlinePrefixDecoderTransformerMultiOut.use_multipitch_aux_head: true
 OnlinePrefixDecoderTransformerMultiOut.multipitch_aux_head_hidden_dim: 256
 OnlinePrefixDecoderTransformerMultiOut.multipitch_dim: 128
@@ -37,12 +34,9 @@ OnlinePrefixDecoderTransformerMultiOut.cqt_aux_head_hidden_dim: 256
 OnlinePrefixDecoderTransformerMultiOut.cqt_dim: 84
 
 # Lit module mirror flags.
-use_beat_phase: false
 use_beat_phase_dit_cond: true
 beat_dit_cond_mlp_expansion: 4
 time_sig_vocab_size: 16
-use_chroma_dit_cond: false
-use_chroma_aux_head: false
 use_multipitch_aux_head: true
 multipitch_aux_head_hidden_dim: 256
 multipitch_aux_head_weight: !!float 1.0

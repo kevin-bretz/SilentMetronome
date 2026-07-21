@@ -1,6 +1,6 @@
 """Extract per-window target-stem CQT from audio.
 
-Companion to ``extract_target_chroma.py`` and ``extract_input_chroma.py``.
+Companion to ``extract_target_multipitch.py``.
 For each window dir, reads the window slice of the target FLAC, computes a
 log-magnitude CQT (84 bins, 7 octaves from C1) and writes ``target_cqt.pt``
 (float16 [T, 84]). The C1 to C8 range stays within what 4-layer DAC

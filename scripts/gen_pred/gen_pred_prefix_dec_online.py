@@ -64,7 +64,6 @@ def generate_prediction(
     # Input Token Stems
     input_token_stems = batch["input_token_stems"]
 
-    # Below copied from dec_online.py
     input_emb = batch["input_emb"].to(device)
     targets = batch["target_token"].to(device)
     dec_inst_tokens = torch.tensor(batch["target_inst_token"], device=device)
@@ -251,13 +250,13 @@ def generate_metadata(batch, idx):
 
 @bind
 def main(
-    model_path: str = "models/stream_music_gen_models/dec_online_context_100/step=100000.ckpt",
-    save_dir: str = "models/stream_music_gen_models/dec_online_context_100/model_predictions",
+    model_path: str = "models/pref_dec_online_fv0_k50_beat_phase_dit_mp_cqt_aux_tt_future/step=200000.ckpt",
+    save_dir: str = "models/pref_dec_online_fv0_k50_beat_phase_dit_mp_cqt_aux_tt_future/model_predictions",
     audio_base_dir: str = "stream_music_gen_data/",
     data_base_dir: str = "stream_music_gen_data/causal_dac_codes_32khz",
     rms_base_dir: str = "stream_music_gen_data/rms_50hz",
     batch_size: int = 64,
-    model_name: str = "enc_dec_multiout",
+    model_name: str = "prefix_decoder_online",
     num_samples: int = -1,
     max_gen_seq_len: int = 500,
     file_id: int = 0,

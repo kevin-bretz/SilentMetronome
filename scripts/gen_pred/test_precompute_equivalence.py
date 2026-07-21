@@ -91,7 +91,7 @@ def main():
     )
     model.to(device).eval()
 
-    if not (model.use_beat_phase_dit_cond or model.use_chroma_dit_cond):
+    if not model.use_beat_phase_dit_cond:
         print("SKIP: model has no DiT conditioning; nothing to precompute.")
         sys.exit(0)
 
@@ -143,7 +143,6 @@ def main():
         time_sig_change=gen_kwargs.get("time_sig_change"),
         tempo_change=gen_kwargs.get("tempo_change"),
         local_bpm_log_padded=gen_kwargs.get("local_bpm_log"),
-        input_chroma_padded=gen_kwargs.get("input_chroma"),
     )
     assert cond is not None and cond.shape[1] == T
     state = precompute_dit_gammas(attn, cond)

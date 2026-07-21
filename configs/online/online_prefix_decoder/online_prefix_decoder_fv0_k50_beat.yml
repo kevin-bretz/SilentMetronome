@@ -1,14 +1,11 @@
 $include:
   - configs/online/online_prefix_decoder/online_prefix_decoder_base.yml
 
-# Plain SMG baseline (no SiMe conditioning, no auxiliary heads) RETRAINED on
-# the _beat re-precompute. The original pref_dec_online_fv0_k50 was trained on
-# the deleted precompute_audio_mixdown_20s and produced degenerate output when
-# evaluated on the _beat windows (train/eval data mismatch), so this run puts
-# the Table-I baseline row on the same data pipeline as every other variant.
-# Recipe mirrors the original resolved args.yml: everything from base.yml
-# (lr 1e-4, 200k steps, bs 16, dim 1024 / depth 16 / heads 16, bf16) plus the
-# two pins below.
+# Plain SMG baseline (no SiMe conditioning, no auxiliary heads), trained on
+# the same _beat data pipeline as every other Table-I variant so the
+# comparison is controlled. Recipe: everything from base.yml (lr 1e-4,
+# 200k steps, bs 16, dim 1024 / depth 16 / heads 16, bf16) plus the two
+# pins below.
 
 data_base_dir: "stream_music_gen_data/precompute_audio_mixdown_20s_beat"
 

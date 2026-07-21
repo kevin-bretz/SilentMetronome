@@ -28,8 +28,8 @@ ENV/
 .env.*
 
 # Data, pretrained weights, and training outputs (large, machine-local)
-/stream_music_gen_data/
-/pretrained_models/
+/stream_music_gen_data
+/pretrained_models
 /cocola_models/
 /beat_transformer_models/
 /models/
