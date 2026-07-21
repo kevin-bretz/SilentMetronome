@@ -1,7 +1,0 @@
-$include:
-  - configs/online/decoder_online_base.yml
-
-DecoderTransformerMultiOut.future_visibility: 0
-DecoderTransformerMultiOut.cond_method: "add"
-
-

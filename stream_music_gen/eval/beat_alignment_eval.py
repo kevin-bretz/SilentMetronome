@@ -72,7 +72,7 @@ def beat_alignment_score(
     root_folder: str,
     context_path: str = "input_audio.wav",
     gt_path: str = "ground_truth/pred.wav",
-    pred_path: str = "stemgen_base/pred.wav",
+    pred_path: str = "pred/pred.wav",
     method: str = "beat_this",
 ) -> Tuple[Dict[str, list], Dict[str, list]]:
     """
@@ -143,7 +143,7 @@ def compute_beat_alignment_given_path_beat_transformer(
     generation_path: str,
     context_path: str = "input_audio.wav",
     gt_path: str = "ground_truth/pred.wav",
-    pred_path: str = "stemgen_base/pred.wav",
+    pred_path: str = "pred/pred.wav",
 ) -> Tuple[Dict[str, float], Dict[str, float]]:
     """
     Computes BeatTransformer's alignment scores for a specific generation folder.
@@ -235,7 +235,7 @@ def compute_beat_alignment_given_path_beat_this(
     generation_path: str,
     context_path: str = "input_audio.wav",
     gt_path: str = "ground_truth/pred.wav",
-    pred_path: str = "stemgen_base/pred.wav",
+    pred_path: str = "pred/pred.wav",
 ) -> Tuple[Dict[str, float], Dict[str, float]]:
     """
     Computes BeatTransformer's alignment scores for a specific generation folder.
@@ -303,7 +303,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--pred_path",
         type=str,
-        default="stemgen_large_8_rvq/pred.wav",
+        default="pred/pred.wav",
         help="Relative path to predicted audio.",
     )
     args = parser.parse_args()

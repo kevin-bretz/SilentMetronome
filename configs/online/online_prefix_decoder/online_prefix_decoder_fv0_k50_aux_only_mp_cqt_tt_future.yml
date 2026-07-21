@@ -14,9 +14,8 @@ $include:
 OnlinePrefixDecoderTransformerMultiOut.future_visibility: 0
 OnlinePrefixDecoderTransformerMultiOut.chunk_length: 50
 
-# Turn OFF the DiT beat-phase conditioning that the mp_cqt_aux mixin enables.
-# The additive conditioner (use_beat_phase) is already off in that mixin, so
-# this leaves the model with no conditioning input at all.
+# Turn OFF the DiT beat-phase conditioning that the mp_cqt_aux mixin
+# enables, leaving the model with no conditioning input at all.
 OnlinePrefixDecoderTransformerMultiOut.use_beat_phase_dit_cond: false
 
 # Target-stem future-token aux head (CE on patterned target tokens at

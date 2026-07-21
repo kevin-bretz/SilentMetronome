@@ -22,7 +22,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--model_type",
-        help="enc_dec_flatten, enc_dec_multiout, stemgen, stemgen_large_8_rvq, dec_online, random_anchor, prefix_decoder",
+        help="prefix_decoder_online",
     )
     parser.add_argument("--model_path", help="path to checkpoint")
     parser.add_argument(
@@ -99,7 +99,7 @@ if __name__ == "__main__":
         "--results_save_dir",
         help="directory to save evaluation results JSON files",
         type=str,
-        default="online-stem-gen/logs/gen_eval_results",
+        default="logs/eval_results",
     )
     parser.add_argument(
         "--seed",
@@ -137,26 +137,14 @@ if __name__ == "__main__":
 
     ckpt_dir = os.path.dirname(args.model_path)
 
-    if args.model_type != "random_anchor":
-        config = argbind.load_args(os.path.join(ckpt_dir, "args.yml"))
-        data_base_dir = args.data_base_dir or config["data_base_dir"]
-    else:
-        config = None
-        data_base_dir = args.data_base_dir
+    config = argbind.load_args(os.path.join(ckpt_dir, "args.yml"))
+    data_base_dir = args.data_base_dir or config["data_base_dir"]
 
     # Read model type
-    if args.model_type == "stemgen":
-        from gen_pred_stemgen import main
-    elif args.model_type == "stemgen_large_8_rvq":
-        from gen_pred_stemgen_large_8_rvq import main
-    elif args.model_type == "dec_online":
-        from gen_pred_dec_online import main
-    elif args.model_type == "random_anchor":
-        from gen_random_anchor import main
-    elif args.model_type == "prefix_decoder":
-        from gen_pred_prefix_decoder import main
-    elif args.model_type == "prefix_decoder_online":
+    if args.model_type == "prefix_decoder_online":
         from gen_pred_prefix_dec_online import main
+    else:
+        raise ValueError(f"unsupported model_type: {args.model_type}")
 
     if args.audio_save_dir == "":
         root_folder = os.path.join(ckpt_dir, args.save_dir_name)

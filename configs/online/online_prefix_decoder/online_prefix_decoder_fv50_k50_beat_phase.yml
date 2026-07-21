@@ -1,6 +1,0 @@
-$include:
-  - configs/online/online_prefix_decoder/online_prefix_decoder_base.yml
-  - configs/online/online_prefix_decoder/online_prefix_decoder_beat_phase.yml
-
-OnlinePrefixDecoderTransformerMultiOut.future_visibility: 50
-OnlinePrefixDecoderTransformerMultiOut.chunk_length: 50

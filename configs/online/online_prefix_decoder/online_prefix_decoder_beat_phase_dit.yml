@@ -6,13 +6,12 @@
 #     - configs/online/online_prefix_decoder/online_prefix_decoder_base.yml
 #     - configs/online/online_prefix_decoder/online_prefix_decoder_beat_phase_dit.yml
 #
-# Differences vs the additive ``..._beat_phase.yml`` mixin:
-#   use_beat_phase=False (additive conditioner off)
-#   use_beat_phase_dit_cond=True (per-layer adaptive layer-norm/scale on)
-# Everything else (data root, LR, schedule, total_steps) stays identical so
-# the only thing varying between runs is the conditioning architecture.
+# use_beat_phase_dit_cond=True turns on the per-layer adaptive
+# layer-norm/scale conditioning. Everything else (data root, LR, schedule,
+# total_steps) stays identical across runs so the only thing varying is
+# the conditioning architecture.
 
-# Data: same root as the additive beat-phase runs (has beat_cond.pt per window)
+# Data: the _beat precompute root (has beat_cond.pt per window)
 data_base_dir: "stream_music_gen_data/precompute_audio_mixdown_20s_beat"
 
 # Same 200K-step from-scratch recipe as baseline + additive beat-phase runs.
@@ -26,13 +25,11 @@ LinearWarmupCosineDecay.total_iters: 200000
 LinearWarmupCosineDecay.eta_min: !!float 1e-5
 
 # Model: turn OFF the additive conditioner, turn ON DiT per-layer.
-OnlinePrefixDecoderTransformerMultiOut.use_beat_phase: false
 OnlinePrefixDecoderTransformerMultiOut.use_beat_phase_dit_cond: true
 OnlinePrefixDecoderTransformerMultiOut.beat_dit_cond_mlp_expansion: 4
 OnlinePrefixDecoderTransformerMultiOut.time_sig_vocab_size: 16
 
 # Lit module (argbind without_prefix): mirror flags so the model gets them.
-use_beat_phase: false
 use_beat_phase_dit_cond: true
 beat_dit_cond_mlp_expansion: 4
 time_sig_vocab_size: 16

@@ -1,4 +1,4 @@
-"""Smoke test for the aux heads (multipitch / CQT / beat-phase-full).
+"""Smoke test for the aux heads (multipitch / CQT / target-token future).
 
 No Lightning, no dataset, no wandb. Instantiates the model with the
 relevant flags, runs forward and backward on synthetic tensors and asserts
@@ -8,7 +8,6 @@ shape/dtype/dead-tensor bugs before committing to a long training run.
 Usage:
     python scripts/smoke_aux_wiring.py
 """
-import sys
 import torch
 import torch.nn.functional as F
 
@@ -33,11 +32,10 @@ def build_synthetic(B=2, T=100, device="cuda"):
         "target_multipitch": (torch.rand(B, T, 128, device=device) > 0.95).float(),
         "target_velocity": torch.rand(B, T, 128, device=device),
         "target_cqt": torch.randn(B, T, 84, device=device),
-        "input_cqt": torch.randn(B, T, 84, device=device),
     }
 
 
-def run_phase(label, model_kwargs):
+def run_case(label, model_kwargs):
     print(f"\n========== SMOKE: {label} ==========")
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"device = {device}")
@@ -57,7 +55,7 @@ def run_phase(label, model_kwargs):
     print(f"trainable params: {n_params/1e6:.1f}M")
 
     batch = build_synthetic(B=2, T=100, device=device)
-    out = model(
+    logits, logits_mask, targets, extra_aux = model(
         x=batch["output_tokens"],
         inst_tokens=batch["inst_tokens"],
         input_emb=batch["input_emb"],
@@ -71,13 +69,7 @@ def run_phase(label, model_kwargs):
         target_multipitch=batch["target_multipitch"],
         target_velocity=batch["target_velocity"],
         target_cqt=batch["target_cqt"],
-        input_cqt=batch["input_cqt"],
     )
-    (logits, logits_mask, targets,
-     beat_aux_pred, beat_aux_target,
-     chroma_aux_pred, chroma_aux_target,
-     chroma_aux_dsv_preds,
-     extra_aux) = out
 
     print(f"logits.shape={tuple(logits.shape)}  targets.shape={tuple(targets.shape)}")
 
@@ -105,40 +97,30 @@ def run_phase(label, model_kwargs):
             print(f"  cqt_mse={mse.item():.4f}  cqt_cos={cos.item():.4f}")
             assert torch.isfinite(mse) and torch.isfinite(cos)
             total = total + 0.5 * mse + 0.5 * cos
-        if "input_cqt_pred" in extra_aux:
-            ic = extra_aux["input_cqt_pred"]
-            ict = extra_aux["input_cqt_target"]
-            print(f"  input_cqt_pred={tuple(ic.shape)} input_cqt_target={tuple(ict.shape)}")
-            mse_in = F.mse_loss(ic, ict)
-            cos_in = 1 - F.cosine_similarity(ic, ict, dim=-1).mean()
-            print(f"  input_cqt_mse={mse_in.item():.4f}  input_cqt_cos={cos_in.item():.4f}")
-            assert torch.isfinite(mse_in) and torch.isfinite(cos_in)
-            total = total + 0.5 * mse_in + 0.5 * cos_in
-        if "beat_full_pred" in extra_aux:
-            bf = extra_aux["beat_full_pred"]
-            pt = extra_aux["beat_full_phase_target"]
-            print(f"  beat_full_pred={tuple(bf.shape)} phase_target={tuple(pt.shape)}")
-            phase_pred = bf[..., :4]
-            bpm_pred = bf[..., 4]
-            ts_logits = bf[..., 5:]
-            phase_loss = F.mse_loss(phase_pred, pt) + (
-                1 - F.cosine_similarity(phase_pred, pt, dim=-1).mean()
-            )
-            bpm_target = batch["bpm_log"].unsqueeze(-1).expand_as(bpm_pred)
-            bpm_loss = F.mse_loss(bpm_pred, bpm_target)
-            ts_target = batch["time_sig_num"].unsqueeze(-1).expand(bpm_pred.shape)
-            ts_loss = F.cross_entropy(
-                ts_logits.reshape(-1, ts_logits.shape[-1]), ts_target.reshape(-1)
-            )
-            print(f"  bf_phase={phase_loss.item():.4f}  bf_bpm={bpm_loss.item():.4f}  bf_ts={ts_loss.item():.4f}")
-            assert all(torch.isfinite(x) for x in (phase_loss, bpm_loss, ts_loss))
-            total = total + phase_loss + 0.1 * bpm_loss + 0.1 * ts_loss
+        if "tt_future_pred" in extra_aux:
+            # pred: [B, num_rvq, chunk, K_off, V]; tgt: [B, num_rvq, chunk,
+            # K_off]; mask: [B, num_rvq, chunk] — same convention as the
+            # lit module's aux loss.
+            pred = extra_aux["tt_future_pred"]
+            tgt = extra_aux["tt_future_target"]
+            mask = extra_aux["tt_future_logits_mask"]
+            print(f"  tt_future_pred={tuple(pred.shape)} tt_future_target={tuple(tgt.shape)}")
+            per_off = []
+            for k in range(pred.shape[3]):
+                pk = pred[:, :, :, k, :][mask]
+                tk = tgt[:, :, :, k].long()[mask]
+                lk = F.cross_entropy(pk, tk)
+                assert torch.isfinite(lk)
+                per_off.append(lk)
+            tt = sum(per_off) / len(per_off)
+            print(f"  tt_future_ce={tt.item():.4f} over {pred.shape[3]} offsets")
+            total = total + tt
 
     print(f"total_loss={total.item():.4f}")
     total.backward()
 
     # Verify all aux head params got gradient.
-    for name in ("multipitch_aux_head", "cqt_aux_head", "input_cqt_aux_head", "beat_phase_aux_head_full"):
+    for name in ("multipitch_aux_head", "cqt_aux_head", "target_token_future_aux_head"):
         if hasattr(model, name):
             head = getattr(model, name)
             grads = [p.grad for p in head.parameters() if p.grad is not None]
@@ -152,7 +134,7 @@ def run_phase(label, model_kwargs):
 
 
 def main():
-    run_phase(
+    run_case(
         "cond + mp + cqt",
         dict(
             use_beat_phase_dit_cond=True,
@@ -166,22 +148,8 @@ def main():
         ),
     )
 
-    run_phase(
-        "mp + cqt + beat-full aux, no cond",
-        dict(
-            use_multipitch_aux_head=True,
-            multipitch_aux_head_hidden_dim=256,
-            multipitch_dim=128,
-            use_cqt_aux_head=True,
-            cqt_aux_head_hidden_dim=256,
-            cqt_dim=84,
-            use_beat_phase_aux_head_full=True,
-            beat_phase_aux_head_full_hidden_dim=256,
-        ),
-    )
-
-    run_phase(
-        "cond + mp + cqt + input_cqt",
+    run_case(
+        "full system: cond + mp + cqt + tt_future",
         dict(
             use_beat_phase_dit_cond=True,
             beat_dit_cond_mlp_expansion=4,
@@ -191,24 +159,24 @@ def main():
             use_cqt_aux_head=True,
             cqt_aux_head_hidden_dim=256,
             cqt_dim=84,
-            use_input_cqt_aux_head=True,
-            input_cqt_aux_head_hidden_dim=256,
-            input_cqt_dim=84,
+            use_target_token_future_aux_head=True,
+            target_token_future_aux_head_hidden_dim=256,
+            future_aux_offsets=[10, 25, 40],
         ),
     )
 
-    run_phase(
-        "cond + mp + cqt + cond_dropout p=0.15",
+    run_case(
+        "aux only: mp + cqt + tt_future, no cond",
         dict(
-            use_beat_phase_dit_cond=True,
-            beat_dit_cond_mlp_expansion=4,
-            cond_dropout_p=0.15,
             use_multipitch_aux_head=True,
             multipitch_aux_head_hidden_dim=256,
             multipitch_dim=128,
             use_cqt_aux_head=True,
             cqt_aux_head_hidden_dim=256,
             cqt_dim=84,
+            use_target_token_future_aux_head=True,
+            target_token_future_aux_head_hidden_dim=256,
+            future_aux_offsets=[10, 25, 40],
         ),
     )
 

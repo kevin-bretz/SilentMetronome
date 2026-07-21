@@ -1,6 +1,6 @@
 """Extract per-window target-stem multipitch and velocity from MIDI.
 
-Mirrors ``extract_target_chroma.py``. For each window dir, maps the target
+For each window dir, maps the target
 audio path to its sibling MIDI file, computes a 128-class binary piano
 roll plus velocity per frame at 50 Hz and writes ``target_multipitch.pt``
 (uint8 [T, 128] in {0, 1}), ``target_velocity.pt`` (uint8 [T, 128] in

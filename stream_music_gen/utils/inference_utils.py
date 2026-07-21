@@ -31,14 +31,6 @@ def load_lit_model(
     if not compile:
         args["compile"] = False
 
-    # KD-trained checkpoints carry a frozen teacher submodule. Inference
-    # doesn't need it, and rebuilding the teacher would double model load
-    # time + memory. Disable the teacher unless the caller explicitly opts
-    # in via ``override_args``.
-    args.setdefault("kd_teacher_ckpt", "")
-    if "kd_teacher_ckpt" not in (override_args or {}):
-        args["kd_teacher_ckpt"] = ""
-
     if override_args:
         args.update(override_args)
 
@@ -54,30 +46,6 @@ def load_lit_model(
         state_dict = {
             k.replace("._orig_mod", ""): v for k, v in state_dict.items()
         }
-
-    # Strip teacher.* keys when the lit module wasn't built with a teacher
-    # (the common inference case). Keeps ``load_state_dict(strict=True)``
-    # honest about other missing/unexpected keys.
-    if not getattr(lit_module, "kd_active", False):
-        state_dict = {
-            k: v for k, v in state_dict.items() if not k.startswith("teacher.")
-        }
-
-    # Strip RL-only buffers and submodules when loading an RL checkpoint
-    # into the standard lit module for eval. LitOnlineRLGRPO carries
-    # extra top-level modules (cocola_model, cocola_extractor, rl_teacher,
-    # discriminator) plus GAPT queue buffers that don't exist on the base
-    # LitOnlinePrefixDecoderMultiOut used at inference time.
-    _rl_prefixes = (
-        "gapt_",
-        "cocola_model.",
-        "cocola_extractor.",
-        "rl_teacher.",
-        "discriminator.",
-    )
-    state_dict = {
-        k: v for k, v in state_dict.items() if not k.startswith(_rl_prefixes)
-    }
 
     lit_module.load_state_dict(state_dict)
     model = lit_module.model

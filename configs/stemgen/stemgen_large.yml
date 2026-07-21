@@ -1,4 +1,0 @@
-$include: 
- - configs/stemgen/stemgen_base.yml
-
-StemGen.depth: 20
