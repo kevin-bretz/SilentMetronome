@@ -45,8 +45,8 @@ Slakh2100 test set, 1024 samples, streaming with 1 s chunks (`chunk_size = 50` f
 | + Cond (tempo + time sig. only) | 0.141 | 57.13 | 4.80 |
 | + SiMe (full cond) | 0.380 | 60.03 | 4.25 |
 | + SiMe + Aux (pitch, spectrum) | 0.411 | 60.36 | **3.96** |
-| + SiMe + Aux + future head (headline) | **0.432** | **60.84** | 4.38 |
-| *Non-causal ref. (fv +50)* | *0.269* | *61.70* | *5.29* |
+| + SiMe + Aux + future head (headline) | **0.432** | 60.84 | 4.38 |
+| *Non-causal ref. (fv +50)* | *0.269* | **61.70** | *5.29* |
 | *Ground truth (ceiling)* | *0.570* | *66.27* | *—* |
 
 - **Beat-F**: F-measure between beats detected ([Beat This](https://github.com/CPJKU/beat_this)) in the generated stem and beats detected in the input mix.
