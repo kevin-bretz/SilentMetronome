@@ -40,19 +40,22 @@ Slakh2100 test set, 1024 samples, streaming with 1 s chunks (`chunk_size = 50` f
 
 | Model | Beat-F ↑ | COCOLA ↑ | FAD ↓ |
 |---|---|---|---|
-| stream-music-gen baseline | 0.133 | 58.56 | 5.56 |
-| + auxiliary heads only | 0.133 | 57.93 | 5.46 |
-| + conditioning without phase (tempo + time sig. only) | 0.141 | 57.13 | 4.80 |
-| + SiMe conditioning | 0.380 | 60.03 | **4.25** |
-| + SiMe + auxiliary heads | **0.432** | **60.84** | 4.38 |
-| *non-causal reference (1 s lookahead)* | *0.269* | *61.70* | *5.29* |
-| *ground truth (held-out real stem)* | *0.570* | *66.27* | *—* |
+| Baseline | 0.133 | 58.56 | 5.56 |
+| + Aux only (all heads) | 0.133 | 57.93 | 5.46 |
+| + Cond (tempo + time sig. only) | 0.141 | 57.13 | 4.80 |
+| + SiMe (full cond) | 0.380 | 60.03 | 4.25 |
+| + SiMe + Aux (pitch, spectrum) | 0.411 | 60.36 | **3.96** |
+| + SiMe + Aux + future head (headline) | **0.432** | 60.84 | 4.38 |
+| *Non-causal ref. (fv +50)* | *0.269* | **61.70** | *5.29* |
+| *Ground truth (ceiling)* | *0.570* | *66.27* | *—* |
 
 - **Beat-F**: F-measure between beats detected ([Beat This](https://github.com/CPJKU/beat_this)) in the generated stem and beats detected in the input mix.
 - **COCOLA**: harmonic/rhythmic compatibility between the generated stem and the input mix.
 - **FAD**: Fréchet Audio Distance (VGGish) against real stems.
 
-The full causal system exceeds the beat alignment of — and is within a single point of the compatibility of — a non-causal reference that is allowed to see one full second of the future mix. The auxiliary heads alone, or the conditioning stripped of its phase channels, stay at the baseline level, so the metrical phase signal is the load-bearing component.
+The full causal system exceeds the beat alignment of — and is within a single point of the compatibility of — a non-causal reference that is allowed to see one full second of the future mix. The auxiliary heads alone, or the conditioning stripped of its phase channels, stay at the baseline level, so the metrical phase signal is the load-bearing component; adding the present-frame pitch and spectrum heads on top of it lifts alignment further to 0.411, and the future-token head contributes the remaining step to 0.432.
+
+Full per-instrument, harmonic/percussive, and long-horizon drift breakdowns for every row are on the [demo page](https://kevin-bretz.github.io/projects/silentmetronome).
 
 ## Installation
 
@@ -154,12 +157,13 @@ Key configs (all at `chunk_size = 50`, i.e. 1 s chunks):
 
 | Model | Config |
 |---|---|
-| Baseline (no conditioning) | `online_prefix_decoder_fv0_k50_beat.yml` |
-| + auxiliary heads only | `online_prefix_decoder_fv0_k50_aux_only_mp_cqt_tt_future.yml` |
-| + conditioning without phase | `online_prefix_decoder_fv0_k50_beat_phase_dit_no_phase.yml` |
-| + SiMe conditioning | `online_prefix_decoder_fv0_k50_beat_phase_dit.yml` |
-| + SiMe + aux heads (full system) | `online_prefix_decoder_fv0_k50_beat_phase_dit_mp_cqt_aux_tt_future.yml` |
-| Non-causal reference (1 s lookahead, no conditioning) | `online_prefix_decoder_fv50_k50_beat.yml` |
+| Baseline | `online_prefix_decoder_fv0_k50_beat.yml` |
+| + Aux only (all heads) | `online_prefix_decoder_fv0_k50_aux_only_mp_cqt_tt_future.yml` |
+| + Cond (tempo + time sig. only) | `online_prefix_decoder_fv0_k50_beat_phase_dit_no_phase.yml` |
+| + SiMe (full cond) | `online_prefix_decoder_fv0_k50_beat_phase_dit.yml` |
+| + SiMe + Aux (pitch, spectrum) | `online_prefix_decoder_fv0_k50_beat_phase_dit_mp_cqt_aux.yml` |
+| + SiMe + Aux + future head (headline) | `online_prefix_decoder_fv0_k50_beat_phase_dit_mp_cqt_aux_tt_future.yml` |
+| Non-causal ref. (fv +50, no conditioning) | `online_prefix_decoder_fv50_k50_beat.yml` |
 
 `fv` is the future visibility in frames (+50 = 1 s lookahead, 0 = strictly up-to-date, −50 = 1 s behind). Use `--init_from_checkpoint <ckpt>` to warm-start from an existing checkpoint.
 
