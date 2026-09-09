@@ -3,10 +3,10 @@
 **Beat-phase conditioning and auxiliary supervision for beat-aligned streaming music accompaniment generation.**
 
 <p align="center">
-  <a href="https://arxiv.org/abs/XXXX.XXXXX"><b>📄 Paper (arXiv)</b></a> ·
+  <a href="https://arxiv.org/abs/2609.07688"><b>📄 Paper (arXiv)</b></a> ·
   <a href="https://kevin-bretz.github.io/projects/silentmetronome"><b>🔊 Demo page</b></a> ·
   <a href="https://huggingface.co/kevin-bretz/SilentMetronome"><b>🤗 Pretrained checkpoints</b></a><br>
-  <sub><i>the paper and demo page are being finalised, and the checkpoint repository is uploaded and goes public together with the paper</i></sub>
+  <sub><i>the checkpoint repository is uploaded and goes public together with this repository</i></sub>
 </p>
 
 SilentMetronome extends [stream-music-gen](https://github.com/lukewys/stream-music-gen) (Wu et al., 2025), a causal transformer that generates a musical accompaniment stem in real time while listening to an incoming mix. The baseline system produces musically plausible audio but drifts off the beat: under strictly causal streaming constraints its accompaniments align poorly with the pulse of the input. SilentMetronome fixes this with two lightweight, architecture-level additions — a *silent metronome* conditioning signal and a set of auxiliary prediction heads — that more than triple beat alignment while also improving harmonic coherence.
