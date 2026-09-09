@@ -251,6 +251,22 @@ stream_music_gen/
 
 The [`ALICE`](../../tree/ALICE) branch additionally contains the SLURM batch scripts we use to run every stage of this pipeline on the ALICE HPC cluster (Leiden University).
 
+## Citation
+
+If you use SilentMetronome in your research, please cite:
+
+```bibtex
+@misc{bretz2026silentmetronome,
+  title         = {Silent Metronome: Rhythmic Grounding for Live Music Accompaniment},
+  author        = {Bretz, Kevin and Soydaner, Derya and Plaat, Aske},
+  year          = {2026},
+  eprint        = {2609.07688},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SD},
+  url           = {https://arxiv.org/abs/2609.07688}
+}
+```
+
 ## Acknowledgements
 
 This project builds directly on [stream-music-gen](https://github.com/lukewys/stream-music-gen) — the model, tokenizer, data pipeline, and evaluation stack originate there:
@@ -264,7 +280,6 @@ This project builds directly on [stream-music-gen](https://github.com/lukewys/st
 }
 ```
 
-A paper describing the SilentMetronome extensions is in preparation.
 
 ## License
 
